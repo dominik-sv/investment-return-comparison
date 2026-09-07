@@ -30,7 +30,7 @@
   .grid + .grid { margin-top: 14px; }
   .card { border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 6px; }
   .plot { width: 100%; height: 340px; }
-  #statsbar { margin: 14px auto; max-width: 620px; }
+  #statsbar { margin: 14px auto; max-width: 720px; }
   #statsbar table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
   #statsbar th, #statsbar td { padding: 6px 14px; text-align: right; border-bottom: 1px solid var(--border); }
   #statsbar thead th { font-weight: 700; }
@@ -94,8 +94,8 @@ const CLR = {
   real_market:   "#0969da",
   real_tbill:    "#bc4c00",
 };
-const EDGE_CLR = "#e3a008";   // bottom-10% / top-10% histogram bins
-const MEAN_CLR = "#24292f";   // mean line on the histogram
+const EDGE_CLR = "#cf222e";   // bottom-10% / top-10% (red)
+const MEAN_CLR = "#24292f";   // mean line on the distribution panels
 const fmtPct = v => (v == null ? "–" : v.toFixed(1) + "%");
 const shortLabel = name => DATA[name].label.split(" — ")[0];
 const rgba = (hex, a) => {
@@ -182,16 +182,20 @@ function fanTraces(name) {
   return t;
 }
 
-function renderFan(div, name, title) {
+function fanY(...names) {
+  const lo = Math.min(0, ...names.flatMap(n => DATA[n].percentiles[5].filter(Number.isFinite)));
+  const hi = Math.max(...names.flatMap(n => DATA[n].percentiles[95].filter(Number.isFinite)));
+  return [lo < 0 ? lo * 1.15 : 0, hi * 1.1];
+}
+
+function renderFan(div, name, title, yrange) {
   const s = DATA[name];
-  const yhi = Math.max(...s.percentiles[95].filter(Number.isFinite));
-  const ylo = Math.min(0, ...s.percentiles[5].filter(Number.isFinite));
   Plotly.react(div, fanTraces(name), {
     margin: { t: 34, r: 14, b: 40, l: 56 },
     title: { text: title, font: { size: 13 } },
     xaxis: { title: "Holding period (years)", zeroline: false, dtick: 1 },
     yaxis: { title: s.unit, zeroline: true, zerolinecolor: "#c8c8c8",
-             range: [ylo < 0 ? ylo * 1.15 : 0, yhi * 1.1], autorange: false },
+             range: yrange || fanY(name), autorange: false },
     showlegend: false, shapes: [vline()],
   }, { displayModeBar: false, responsive: true });
 }
@@ -213,11 +217,16 @@ function renderPbzCurve(div, name) {
 }
 
 // ---- distribution panel: PDF (histogram) or CDF (step curve) ----------
-function distDecor(h, i, aboveTop) {   // mean line + tail-mass / mean labels
+function distDecor(h, i, aboveTop) {   // mean + p10/p90 lines, tail-mass / mean labels
   const mean = h.mean[i];
+  const pLine = x => ({ type: "line", xref: "x", yref: "paper", x0: x, x1: x, y0: 0, y1: 1,
+                        line: { color: EDGE_CLR, width: 1, dash: "dot" } });
   return {
-    shapes: [{ type: "line", xref: "x", yref: "paper", x0: mean, x1: mean, y0: 0, y1: 1,
-               line: { color: MEAN_CLR, width: 2 } }],
+    shapes: [
+      { type: "line", xref: "x", yref: "paper", x0: mean, x1: mean, y0: 0, y1: 1,
+        line: { color: MEAN_CLR, width: 2 } },
+      pLine(h.p10[i]), pLine(h.p90[i]),
+    ],
     annotations: [
       { xref: "paper", yref: "paper", x: 0.01, y: 0.98, xanchor: "left", yanchor: "top",
         showarrow: false, font: { size: 11, color: "#57606a" },
@@ -232,7 +241,7 @@ function distDecor(h, i, aboveTop) {   // mean line + tail-mass / mean labels
   };
 }
 
-function renderHist(div, name, title) {
+function renderHist(div, name, title, opts = {}) {
   const s = DATA[name], i = state.hIdx, h = s.hist;
   const e = h.edges, counts = h.counts[i], n = h.n[i];
   const cx = counts.map((_, k) => (e[k] + e[k + 1]) / 2);
@@ -240,6 +249,8 @@ function renderHist(div, name, title) {
   const p10 = h.p10[i], p90 = h.p90[i];
   const colors = cx.map(x => (x < p10 || x > p90) ? EDGE_CLR : rgba(CLR[name], 0.55));
   const dec = distDecor(h, i, true);
+  const yax = { title: "probability", tickformat: ".1%" };
+  if (opts.yr) { yax.range = opts.yr; yax.autorange = false; } else { yax.rangemode = "tozero"; }
   Plotly.react(div, [{
     type: "bar", x: cx, y: counts.map(c => c / n), width: w,
     marker: { color: colors, line: { width: 0 } },
@@ -247,36 +258,56 @@ function renderHist(div, name, title) {
   }], {
     bargap: 0.02, margin: { t: 34, r: 14, b: 40, l: 52 },
     title: { text: title, font: { size: 13 } },
-    xaxis: { title: s.unit, range: [e[0], e[e.length - 1]], autorange: false,
+    xaxis: { title: s.unit, range: opts.xr || [e[0], e[e.length - 1]], autorange: false,
              zeroline: true, zerolinecolor: "#c8c8c8" },
-    yaxis: { title: "probability", tickformat: ".1%", rangemode: "tozero" },
+    yaxis: yax,
     shapes: dec.shapes, annotations: dec.annotations, showlegend: false,
   }, { displayModeBar: false, responsive: true });
 }
 
-function renderCdf(div, name, title) {
+function renderCdf(div, name, title, opts = {}) {
   const s = DATA[name], i = state.hIdx, h = s.hist;
   const e = h.edges, counts = h.counts[i], n = h.n[i];
+  const xr = opts.xr || [e[0], e[e.length - 1]];
+  const lo = xr[0], hi = xr[1];
+  const c10 = Math.max(lo, Math.min(hi, h.p10[i]));
+  const c90 = Math.max(lo, Math.min(hi, h.p90[i]));
+
+  // cumulative probability at each bin edge
   let cum = h.below_pct[i] / 100;
-  const xs = [e[0]], ys = [cum];
-  for (let k = 0; k < counts.length; k++) { cum += counts[k] / n; xs.push(e[k + 1]); ys.push(cum); }
+  const ex = [e[0]], ey = [cum];
+  for (let k = 0; k < counts.length; k++) { cum += counts[k] / n; ex.push(e[k + 1]); ey.push(cum); }
+  const yAt = x => { let v = ey[0]; for (let k = 0; k < ex.length; k++) { if (ex[k] <= x) v = ey[k]; else break; } return v; };
+  const seg = (x0, x1) => {
+    if (x1 <= x0) return null;
+    const xs = [x0], yy = [yAt(x0)];
+    for (let k = 0; k < ex.length; k++) if (ex[k] > x0 && ex[k] < x1) { xs.push(ex[k]); yy.push(ey[k]); }
+    xs.push(x1); yy.push(yAt(x1));
+    return { x: xs, y: yy };
+  };
+  const mk = (d, col) => d && {
+    x: d.x, y: d.y, mode: "lines", line: { color: col, width: 2, shape: "hv" },
+    hovertemplate: "%{x:.0f}  %{y:.1%}<extra></extra>", showlegend: false,
+  };
+  const traces = [mk(seg(lo, c10), EDGE_CLR), mk(seg(c10, c90), CLR[name]),
+                  mk(seg(c90, hi), EDGE_CLR)].filter(Boolean);
+
   const dec = distDecor(h, i, false);
-  Plotly.react(div, [{
-    x: xs, y: ys, mode: "lines", fill: "tozeroy", fillcolor: rgba(CLR[name], 0.12),
-    line: { color: CLR[name], width: 2, shape: "hv" },
-    hovertemplate: "%{x:.0f}  %{y:.1%}<extra></extra>",
-  }], {
+  const bands = [[lo, c10], [c90, hi]].map(([x0, x1]) => ({
+    type: "rect", xref: "x", yref: "paper", x0, x1, y0: 0, y1: 1, layer: "below",
+    fillcolor: rgba(EDGE_CLR, 0.10), line: { width: 0 },
+  }));
+  Plotly.react(div, traces, {
     margin: { t: 34, r: 14, b: 40, l: 52 },
     title: { text: title, font: { size: 13 } },
-    xaxis: { title: s.unit, range: [e[0], e[e.length - 1]], autorange: false,
-             zeroline: true, zerolinecolor: "#c8c8c8" },
+    xaxis: { title: s.unit, range: xr, autorange: false, zeroline: true, zerolinecolor: "#c8c8c8" },
     yaxis: { title: "cumulative probability", range: [0, 1], tickformat: ".0%" },
-    shapes: dec.shapes, annotations: dec.annotations, showlegend: false,
+    shapes: [...bands, ...dec.shapes], annotations: dec.annotations, showlegend: false,
   }, { displayModeBar: false, responsive: true });
 }
 
-const renderDist = (div, name, title) =>
-  (state.mode === "cdf" ? renderCdf : renderHist)(div, name, title);
+const renderDist = (div, name, title, opts) =>
+  (state.mode === "cdf" ? renderCdf : renderHist)(div, name, title, opts);
 
 // ---- single-horizon P(<0) bar ------------------------------------
 function renderPbzBar(div, name) {
@@ -293,33 +324,32 @@ function renderPbzBar(div, name) {
   }, { displayModeBar: false, responsive: true });
 }
 
-// ---- stats table (between the chart rows) --------------------------
+// ---- stats table (between the chart rows) — rows = series, cols = stats
 function renderStats() {
   const series = activeSeries(), i = state.hIdx;
-  const rows = [
+  const cols = [
     ["Mean", s => s.hist.mean[i], true],
     ["Std. dev.", s => s.hist.std[i], false],
-    ["10th percentile", s => s.hist.p10[i], true],
-    ["90th percentile", s => s.hist.p90[i], true],
+    ["10th pct", s => s.hist.p10[i], true],
+    ["90th pct", s => s.hist.p90[i], true],
   ];
   const fmt = (v, signed) => v == null ? "–"
     : (signed && v > 0 ? "+" : "") + v.toFixed(1) + "%";
-  const head = series.map(n =>
-    `<th style="color:${CLR[n]}">${shortLabel(n)}</th>`).join("");
-  const body = rows.map(([label, get, signed]) =>
-    `<tr><th>${label}</th>` +
-    series.map(n => `<td>${fmt(get(DATA[n]), signed)}</td>`).join("") +
+  const head = "<tr><th></th>" + cols.map(([l]) => `<th>${l}</th>`).join("") + "</tr>";
+  const body = series.map(n =>
+    `<tr><th style="color:${CLR[n]}">${shortLabel(n)}</th>` +
+    cols.map(([, get, signed]) => `<td>${fmt(get(DATA[n]), signed)}</td>`).join("") +
     `</tr>`).join("");
-  $("statsbar").innerHTML =
-    `<table><thead><tr><th></th>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  $("statsbar").innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
 // ---- orchestration --------------------------------------------------
 function renderStatic() {
   const [a, b] = activeSeries();
   if (isSplit()) {
-    renderFan("fan", a, shortLabel(a) + " — window return");
-    renderFan("pbz", b, shortLabel(b) + " — window return");
+    const yr = fanY(a, b);                       // shared y-axis for the two fans
+    renderFan("fan", a, shortLabel(a) + " — window return", yr);
+    renderFan("pbz", b, shortLabel(b) + " — window return", yr);
   } else {
     renderFan("fan", a, "Distribution of the window return");
     renderPbzCurve("pbz", a);
@@ -333,8 +363,16 @@ function renderDynamic() {
   renderStats();
 
   if (isSplit()) {
-    renderDist("hist", a, `${shortLabel(a)} — at ${yr.toFixed(2)} yr`);
-    renderDist("bar", b, `${shortLabel(b)} — at ${yr.toFixed(2)} yr`);
+    const ea = DATA[a].hist.edges, eb = DATA[b].hist.edges;
+    const xr = [Math.min(ea[0], eb[0]), Math.max(ea[ea.length - 1], eb[eb.length - 1])];
+    let ymax = 0;
+    for (const nm of [a, b]) {
+      const hh = DATA[nm].hist, nn = hh.n[i];
+      ymax = Math.max(ymax, ...hh.counts[i].map(c => c / nn));
+    }
+    const opts = { xr, yr: [0, ymax * 1.12] };   // shared axes for the two dist panels
+    renderDist("hist", a, `${shortLabel(a)} — at ${yr.toFixed(2)} yr`, opts);
+    renderDist("bar", b, `${shortLabel(b)} — at ${yr.toFixed(2)} yr`, opts);
   } else {
     const kind = state.mode === "cdf" ? "Cumulative distribution" : "Return distribution";
     renderDist("hist", a, `${kind} at ${yr.toFixed(2)} yr`);
@@ -348,7 +386,7 @@ function renderDynamic() {
   $("foot").innerHTML =
     `At this horizon: ${s0.hist.n[i].toLocaleString()} overlapping windows. Histogram x-axis is ` +
     `fixed across horizons; mass past each edge is shown top-left / top-right. ` +
-    `Bottom &amp; top 10% shaded; the vertical line is the mean. ` +
+    `Bottom &amp; top 10% in red (dotted lines = 10th / 90th percentile); black line = mean. ` +
     `<a href="https://github.com/dominik-sv/investment-return-comparison">source</a>.`;
 }
 
