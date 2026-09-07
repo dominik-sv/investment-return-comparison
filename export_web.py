@@ -1,0 +1,127 @@
+"""Export compact JSON for the static website from data/processed/*.npz.
+
+Reads the full return distributions and writes docs/data/*.json (~2-3 MB total):
+
+* per series -- a fine percentile grid + P(window return < 0) + sample size, at
+  daily horizon resolution;
+* per series -- binned histograms at a coarser horizon stride (config.WEB_*).
+
+No raw arrays leave this step; the website only ever sees these JSON files.
+
+    python export_web.py            # after process_data.py has run
+"""
+from __future__ import annotations
+
+import datetime as dt
+import json
+
+import numpy as np
+
+import config
+import process_data
+
+_LABEL = {
+    "excess_wealth": "US market vs 1M T-bill — extra wealth per $1",
+    "real_market": "US market — real (CPI-deflated) total return",
+    "real_tbill": "1M T-bill — real (CPI-deflated) total return",
+}
+_UNIT = {
+    "excess_wealth": "% of stake",
+    "real_market": "%",
+    "real_tbill": "%",
+}
+_VIEWS = {
+    "excess": {
+        "label": "Market excess of the risk-free rate",
+        "series": ["excess_wealth"],
+    },
+    "real": {
+        "label": "Real market vs real risk-free rate",
+        "series": ["real_market", "real_tbill"],
+    },
+}
+
+
+def _r(a, nd=3):
+    """Round to a list of plain floats, NaN/inf -> None (JSON null)."""
+    return [None if not np.isfinite(x) else round(float(x), nd) for x in np.asarray(a)]
+
+
+def _series_payload(name: str, method: str) -> dict:
+    dist, _ = process_data.load_processed(name, method)
+    horizons = np.array(sorted(dist))
+    levels = config.WEB_PCT_LEVELS
+
+    pmat = np.vstack([np.percentile(dist[int(h)], levels) for h in horizons])   # (H, L)
+    p_below_zero = np.array([100.0 * np.mean(dist[int(h)] < 0) for h in horizons])
+    n = np.array([dist[int(h)].size for h in horizons])
+
+    # histograms at a coarser stride (first + last horizon always included)
+    stride = max(1, config.WEB_HIST_STRIDE_DAYS)
+    idx = list(range(0, len(horizons), stride))
+    if idx[-1] != len(horizons) - 1:
+        idx.append(len(horizons) - 1)
+    hh = horizons[idx]
+
+    edges, counts, hmean, hmed, hn = [], [], [], [], []
+    for h in hh:
+        r = dist[int(h)]
+        lo, hi = np.percentile(r, config.WEB_HIST_CLIP_PCT)
+        if hi <= lo:
+            hi = lo + 1.0
+        c, e = np.histogram(r, bins=config.WEB_HIST_BINS, range=(float(lo), float(hi)))
+        edges.append(_r(e, 3))
+        counts.append([int(x) for x in c])          # sum(counts) <= n (tails clipped)
+        hmean.append(float(r.mean()))
+        hmed.append(float(np.median(r)))
+        hn.append(int(r.size))
+
+    return {
+        "name": name,
+        "label": _LABEL[name],
+        "unit": _UNIT[name],
+        "horizons_days": [int(x) for x in horizons],
+        "horizons_years": _r(horizons / config.DAYS_PER_YEAR, 4),
+        "n": [int(x) for x in n],
+        "pct_levels": levels,
+        "percentiles": {str(levels[j]): _r(pmat[:, j], 3) for j in range(len(levels))},
+        "p_below_zero": _r(p_below_zero, 2),
+        "hist": {
+            "horizons_days": [int(x) for x in hh],
+            "horizons_years": _r(hh / config.DAYS_PER_YEAR, 4),
+            "n": hn,
+            "edges": edges,
+            "counts": counts,
+            "mean": _r(hmean, 3),
+            "median": _r(hmed, 3),
+        },
+    }
+
+
+def main() -> None:
+    config.WEB_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    method = config.WEB_METHOD
+
+    for name in config.SERIES:
+        payload = _series_payload(name, method)
+        path = config.WEB_DATA_DIR / f"{name}.json"
+        path.write_text(json.dumps(payload, separators=(",", ":")))
+        print(f"wrote {path.name:24s} {path.stat().st_size / 1e3:6.0f} KB  "
+              f"({len(payload['horizons_days'])} horizons, "
+              f"{len(payload['hist']['horizons_days'])} hist)")
+
+    meta = {
+        "generated": dt.date.today().isoformat(),
+        "method": method,
+        "pct_levels": config.WEB_PCT_LEVELS,
+        "series_labels": _LABEL,
+        "units": _UNIT,
+        "views": _VIEWS,
+    }
+    meta_path = config.WEB_DATA_DIR / "meta.json"
+    meta_path.write_text(json.dumps(meta, indent=2))
+    print(f"wrote {meta_path.name}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Large regenerated artifacts — rebuild with: python process_data.py
+data/processed/
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
