@@ -63,17 +63,25 @@ def _series_payload(name: str, method: str) -> dict:
         idx.append(len(horizons) - 1)
     hh = horizons[idx]
 
-    edges, counts, hmean, hmed, hn = [], [], [], [], []
+    # ONE fixed bin grid for every horizon: 1st..99th pct at the reference horizon
+    ref_days = config.WEB_HIST_RANGE_REF_YEARS * config.DAYS_PER_YEAR
+    ref_h = int(horizons[np.argmin(np.abs(horizons - ref_days))])
+    lo, hi = (float(x) for x in np.percentile(dist[ref_h], config.WEB_HIST_RANGE_PCT))
+    edges = np.linspace(lo, hi, config.WEB_HIST_BINS + 1)
+
+    counts, below, above, hmean, hstd, hmed, hp10, hp90, hn = ([] for _ in range(9))
     for h in hh:
         r = dist[int(h)]
-        lo, hi = np.percentile(r, config.WEB_HIST_CLIP_PCT)
-        if hi <= lo:
-            hi = lo + 1.0
-        c, e = np.histogram(r, bins=config.WEB_HIST_BINS, range=(float(lo), float(hi)))
-        edges.append(_r(e, 3))
-        counts.append([int(x) for x in c])          # sum(counts) <= n (tails clipped)
+        c, _ = np.histogram(r, bins=edges)
+        counts.append([int(x) for x in c])
+        below.append(100.0 * float(np.mean(r < lo)))
+        above.append(100.0 * float(np.mean(r > hi)))
+        p10, p90 = np.percentile(r, [10, 90])
         hmean.append(float(r.mean()))
+        hstd.append(float(r.std(ddof=1)))
         hmed.append(float(np.median(r)))
+        hp10.append(float(p10))
+        hp90.append(float(p90))
         hn.append(int(r.size))
 
     return {
@@ -90,10 +98,16 @@ def _series_payload(name: str, method: str) -> dict:
             "horizons_days": [int(x) for x in hh],
             "horizons_years": _r(hh / config.DAYS_PER_YEAR, 4),
             "n": hn,
-            "edges": edges,
+            "range": _r([lo, hi], 3),
+            "edges": _r(edges, 3),                   # shared across all horizons
             "counts": counts,
+            "below_pct": _r(below, 2),               # mass left of the fixed range
+            "above_pct": _r(above, 2),               # mass right of the fixed range
             "mean": _r(hmean, 3),
+            "std": _r(hstd, 3),
             "median": _r(hmed, 3),
+            "p10": _r(hp10, 3),
+            "p90": _r(hp90, 3),
         },
     }
 
