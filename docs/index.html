@@ -27,10 +27,18 @@
   .seg button:last-child { border-right: 0; }
   .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid + .grid { margin-top: 14px; }
   .card { border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 6px; }
   .plot { width: 100%; height: 340px; }
+  #statsbar { margin: 14px auto; max-width: 620px; }
+  #statsbar table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  #statsbar th, #statsbar td { padding: 6px 14px; text-align: right; border-bottom: 1px solid var(--border); }
+  #statsbar thead th { font-weight: 700; }
+  #statsbar tbody th { text-align: left; font-weight: 500; color: var(--muted); }
   .sliderbox { margin: 18px 2px 4px; }
+  .sliderrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   .sliderbox label { font-weight: 600; }
+  #modeToggle button { padding: 5px 12px; font-size: 13px; }
   .sliderbox .val { color: var(--accent); font-variant-numeric: tabular-nums; }
   input[type=range] { width: 100%; }
   .foot { color: var(--muted); font-size: 12px; margin-top: 22px; }
@@ -55,12 +63,23 @@
   <div class="grid">
     <div class="card"><div id="fan" class="plot"></div></div>
     <div class="card"><div id="pbz" class="plot"></div></div>
+  </div>
+
+  <div id="statsbar"></div>
+
+  <div class="grid">
     <div class="card"><div id="hist" class="plot"></div></div>
     <div class="card"><div id="bar" class="plot"></div></div>
   </div>
 
   <div class="sliderbox">
-    <label for="hslider">Holding period: <span class="val" id="hlabel"></span></label>
+    <div class="sliderrow">
+      <label for="hslider">Holding period: <span class="val" id="hlabel"></span></label>
+      <span class="seg" id="modeToggle" role="group" aria-label="Distribution view">
+        <button data-mode="pdf" aria-pressed="true">PDF</button>
+        <button data-mode="cdf" aria-pressed="false">CDF</button>
+      </span>
+    </div>
     <input type="range" id="hslider" min="0" max="0" value="0" step="1">
   </div>
 
@@ -75,6 +94,8 @@ const CLR = {
   real_market:   "#0969da",
   real_tbill:    "#bc4c00",
 };
+const EDGE_CLR = "#e3a008";   // bottom-10% / top-10% histogram bins
+const MEAN_CLR = "#24292f";   // mean line on the histogram
 const fmtPct = v => (v == null ? "–" : v.toFixed(1) + "%");
 const shortLabel = name => DATA[name].label.split(" — ")[0];
 const rgba = (hex, a) => {
@@ -82,7 +103,7 @@ const rgba = (hex, a) => {
   return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
 };
 
-const state = { viewKey: null, hIdx: 0 };
+const state = { viewKey: null, hIdx: 0, mode: "pdf" };   // mode: "pdf" | "cdf"
 let META = null;
 const DATA = {};                 // series name -> payload
 
@@ -113,6 +134,15 @@ async function boot() {
   sl.value = state.hIdx;
   sl.addEventListener("input", () => { state.hIdx = +sl.value; renderDynamic(); });
 
+  document.querySelectorAll("#modeToggle button").forEach(b => {
+    b.onclick = () => {
+      state.mode = b.dataset.mode;
+      document.querySelectorAll("#modeToggle button").forEach(x =>
+        x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      renderDynamic();
+    };
+  });
+
   $("status").hidden = true;
   $("app").hidden = false;
   setView(state.viewKey);
@@ -128,20 +158,22 @@ function setView(key) {
 }
 
 const activeSeries = () => META.views[state.viewKey].series;
+const isSplit = () => activeSeries().length === 2;   // 2-series view -> market | risk-free columns
 const dailyIndexForHist = (s, hIdx) =>
   s.horizons_days.indexOf(s.hist.horizons_days[hIdx]);
+const hYears = () => DATA[activeSeries()[0]].hist.horizons_years[state.hIdx];
 
-// ---- fan chart + P(<0) curve (change only with the view) ----------------
-function fanTraces(name, solo) {
+// ---- fan chart --------------------------------------------------------
+const FAN_LV = [5, 10, 20, 30, 40, 60, 70, 80, 90, 95];   // 9 rings around the median
+const FAN_A = [.09, .13, .18, .25, .34, .25, .18, .13, .09]; // 5 symmetric shade levels
+
+function fanTraces(name) {
   const s = DATA[name], x = s.horizons_years, c = CLR[name];
-  const bands = solo ? [[5, 95, .10], [10, 90, .16], [25, 75, .28]]
-                     : [[10, 90, .16]];
-  const t = [];
-  for (const [lo, hi, op] of bands) {
-    t.push({ x, y: s.percentiles[lo], mode: "lines", line: { width: 0 },
-             hoverinfo: "skip", showlegend: false });
-    t.push({ x, y: s.percentiles[hi], mode: "lines", line: { width: 0 },
-             fill: "tonexty", fillcolor: rgba(c, op),
+  const t = [{ x, y: s.percentiles[FAN_LV[0]], mode: "lines", line: { width: 0 },
+               hoverinfo: "skip", showlegend: false }];
+  for (let k = 1; k < FAN_LV.length; k++) {
+    t.push({ x, y: s.percentiles[FAN_LV[k]], mode: "lines", line: { width: 0 },
+             fill: "tonexty", fillcolor: rgba(c, FAN_A[k - 1]),
              hoverinfo: "skip", showlegend: false });
   }
   t.push({ x, y: s.percentiles[50], mode: "lines", name: shortLabel(name),
@@ -150,100 +182,174 @@ function fanTraces(name, solo) {
   return t;
 }
 
-function renderStatic() {
-  const series = activeSeries(), solo = series.length === 1;
-  const unit = DATA[series[0]].unit;
-
-  let ylo = 0, yhi = 0;
-  for (const n of series) {
-    const p = DATA[n].percentiles;
-    yhi = Math.max(yhi, Math.max(...p[95].filter(Number.isFinite)));
-    ylo = Math.min(ylo, Math.min(...p[5].filter(Number.isFinite)));
-  }
-  const fanRange = [ylo < 0 ? ylo * 1.15 : 0, yhi * 1.1];
-
-  Plotly.react("fan", series.flatMap(n => fanTraces(n, solo)), {
-    margin: { t: 34, r: 12, b: 40, l: 56 },
-    title: { text: "Distribution of the window return", font: { size: 13 } },
-    xaxis: { title: "Holding period (years)", zeroline: false },
-    yaxis: { title: unit, zeroline: true, zerolinecolor: "#c8c8c8",
-             range: fanRange, autorange: false },
-    legend: { orientation: "h", y: -0.22 }, showlegend: !solo,
-    shapes: [vline()],
-  }, { displayModeBar: false, responsive: true });
-
-  Plotly.react("pbz", series.map(n => ({
-    x: DATA[n].horizons_years, y: DATA[n].p_below_zero, mode: "lines",
-    name: shortLabel(n), line: { color: CLR[n], width: 1.8 },
-    hovertemplate: "%{x:.1f} yr  %{y:.1f}%<extra></extra>",
-  })), {
-    margin: { t: 34, r: 12, b: 40, l: 48 },
-    title: { text: "P(window return < 0)", font: { size: 13 } },
-    xaxis: { title: "Holding period (years)", zeroline: false },
-    yaxis: { title: "%", rangemode: "tozero", ticksuffix: "%" },
-    legend: { orientation: "h", y: -0.22 }, showlegend: !solo,
-    shapes: [vline()],
+function renderFan(div, name, title) {
+  const s = DATA[name];
+  const yhi = Math.max(...s.percentiles[95].filter(Number.isFinite));
+  const ylo = Math.min(0, ...s.percentiles[5].filter(Number.isFinite));
+  Plotly.react(div, fanTraces(name), {
+    margin: { t: 34, r: 14, b: 40, l: 56 },
+    title: { text: title, font: { size: 13 } },
+    xaxis: { title: "Holding period (years)", zeroline: false, dtick: 1 },
+    yaxis: { title: s.unit, zeroline: true, zerolinecolor: "#c8c8c8",
+             range: [ylo < 0 ? ylo * 1.15 : 0, yhi * 1.1], autorange: false },
+    showlegend: false, shapes: [vline()],
   }, { displayModeBar: false, responsive: true });
 }
 
-// ---- histogram + single-horizon bar (change with the slider) ----------
-function histTrace(name) {
-  const s = DATA[name], i = state.hIdx;
-  const e = s.hist.edges[i], counts = s.hist.counts[i];
-  const cx = counts.map((_, k) => (e[k] + e[k + 1]) / 2);
-  const w = counts.map((_, k) => e[k + 1] - e[k]);
+// ---- P(window return < 0) curve ------------------------------------
+function renderPbzCurve(div, name) {
+  const s = DATA[name];
+  Plotly.react(div, [{
+    x: s.horizons_years, y: s.p_below_zero, mode: "lines",
+    line: { color: CLR[name], width: 1.8 },
+    hovertemplate: "%{x:.1f} yr  %{y:.1f}%<extra></extra>",
+  }], {
+    margin: { t: 34, r: 14, b: 40, l: 48 },
+    title: { text: "P(window return < 0)", font: { size: 13 } },
+    xaxis: { title: "Holding period (years)", zeroline: false, dtick: 1 },
+    yaxis: { title: "%", range: [0, 100], ticksuffix: "%" },
+    showlegend: false, shapes: [vline()],
+  }, { displayModeBar: false, responsive: true });
+}
+
+// ---- distribution panel: PDF (histogram) or CDF (step curve) ----------
+function distDecor(h, i, aboveTop) {   // mean line + tail-mass / mean labels
+  const mean = h.mean[i];
   return {
-    type: "bar", x: cx, y: counts, width: w, name: s.label,
-    marker: { color: rgba(CLR[name], 0.55), line: { width: 0 } },
-    hovertemplate: "%{x:.0f}  &times;%{y}<extra></extra>",
+    shapes: [{ type: "line", xref: "x", yref: "paper", x0: mean, x1: mean, y0: 0, y1: 1,
+               line: { color: MEAN_CLR, width: 2 } }],
+    annotations: [
+      { xref: "paper", yref: "paper", x: 0.01, y: 0.98, xanchor: "left", yanchor: "top",
+        showarrow: false, font: { size: 11, color: "#57606a" },
+        text: "← " + h.below_pct[i].toFixed(1) + "% below" },
+      { xref: "paper", yref: "paper", x: 0.99, y: aboveTop ? 0.98 : 0.04,
+        xanchor: "right", yanchor: aboveTop ? "top" : "bottom",
+        showarrow: false, font: { size: 11, color: "#57606a" },
+        text: h.above_pct[i].toFixed(1) + "% above →" },
+      { x: mean, y: 1, yref: "paper", yanchor: "bottom", showarrow: false,
+        font: { size: 10, color: MEAN_CLR }, text: "mean" },
+    ],
   };
 }
 
-function renderDynamic() {
-  const series = activeSeries(), solo = series.length === 1;
-  const s0 = DATA[series[0]], i = state.hIdx;
-  const yrs = s0.hist.horizons_years[i];
-  $("hlabel").textContent = yrs.toFixed(2) + " years  (" + s0.hist.horizons_days[i] + " days)";
-
-  // histogram
-  Plotly.react("hist", series.map(histTrace), {
-    barmode: "overlay", bargap: 0.02,
-    margin: { t: 34, r: 12, b: 40, l: 48 },
-    title: { text: `Return distribution at ${yrs.toFixed(2)} yr`, font: { size: 13 } },
-    xaxis: { title: DATA[series[0]].unit, zeroline: true, zerolinecolor: "#c8c8c8" },
-    yaxis: { title: "windows" },
-    legend: { orientation: "h", y: -0.22 }, showlegend: !solo,
-  }, { displayModeBar: false, responsive: true });
-
-  // single-horizon P(<0) bar
-  const bx = [], by = [], bt = [], bc = [];
-  for (const n of series) {
-    const j = dailyIndexForHist(DATA[n], i);
-    const v = DATA[n].p_below_zero[j];
-    bx.push(solo ? "P(return < 0)" : shortLabel(n));
-    by.push(v); bt.push(fmtPct(v)); bc.push(CLR[n]);
-  }
-  Plotly.react("bar", [{
-    type: "bar", x: bx, y: by, text: bt, textposition: "outside", cliponaxis: false,
-    width: solo ? 0.4 : 0.55,
-    marker: { color: bc.map(c => rgba(c, 0.85)) }, hoverinfo: "skip",
+function renderHist(div, name, title) {
+  const s = DATA[name], i = state.hIdx, h = s.hist;
+  const e = h.edges, counts = h.counts[i], n = h.n[i];
+  const cx = counts.map((_, k) => (e[k] + e[k + 1]) / 2);
+  const w = counts.map((_, k) => e[k + 1] - e[k]);
+  const p10 = h.p10[i], p90 = h.p90[i];
+  const colors = cx.map(x => (x < p10 || x > p90) ? EDGE_CLR : rgba(CLR[name], 0.55));
+  const dec = distDecor(h, i, true);
+  Plotly.react(div, [{
+    type: "bar", x: cx, y: counts.map(c => c / n), width: w,
+    marker: { color: colors, line: { width: 0 } },
+    hovertemplate: "%{x:.0f}  %{y:.2%}<extra></extra>",
   }], {
-    margin: { t: 34, r: 12, b: 40, l: 48 },
-    title: { text: `P(return < 0) at ${yrs.toFixed(2)} yr`, font: { size: 13 } },
-    yaxis: { title: "%", range: [0, Math.max(...by) * 1.3 || 1], ticksuffix: "%" },
-    xaxis: { automargin: true },
+    bargap: 0.02, margin: { t: 34, r: 14, b: 40, l: 52 },
+    title: { text: title, font: { size: 13 } },
+    xaxis: { title: s.unit, range: [e[0], e[e.length - 1]], autorange: false,
+             zeroline: true, zerolinecolor: "#c8c8c8" },
+    yaxis: { title: "probability", tickformat: ".1%", rangemode: "tozero" },
+    shapes: dec.shapes, annotations: dec.annotations, showlegend: false,
   }, { displayModeBar: false, responsive: true });
+}
 
-  // move the vertical markers without a full redraw
+function renderCdf(div, name, title) {
+  const s = DATA[name], i = state.hIdx, h = s.hist;
+  const e = h.edges, counts = h.counts[i], n = h.n[i];
+  let cum = h.below_pct[i] / 100;
+  const xs = [e[0]], ys = [cum];
+  for (let k = 0; k < counts.length; k++) { cum += counts[k] / n; xs.push(e[k + 1]); ys.push(cum); }
+  const dec = distDecor(h, i, false);
+  Plotly.react(div, [{
+    x: xs, y: ys, mode: "lines", fill: "tozeroy", fillcolor: rgba(CLR[name], 0.12),
+    line: { color: CLR[name], width: 2, shape: "hv" },
+    hovertemplate: "%{x:.0f}  %{y:.1%}<extra></extra>",
+  }], {
+    margin: { t: 34, r: 14, b: 40, l: 52 },
+    title: { text: title, font: { size: 13 } },
+    xaxis: { title: s.unit, range: [e[0], e[e.length - 1]], autorange: false,
+             zeroline: true, zerolinecolor: "#c8c8c8" },
+    yaxis: { title: "cumulative probability", range: [0, 1], tickformat: ".0%" },
+    shapes: dec.shapes, annotations: dec.annotations, showlegend: false,
+  }, { displayModeBar: false, responsive: true });
+}
+
+const renderDist = (div, name, title) =>
+  (state.mode === "cdf" ? renderCdf : renderHist)(div, name, title);
+
+// ---- single-horizon P(<0) bar ------------------------------------
+function renderPbzBar(div, name) {
+  const s = DATA[name], v = s.p_below_zero[dailyIndexForHist(s, state.hIdx)];
+  Plotly.react(div, [{
+    type: "bar", x: ["P(return < 0)"], y: [v], text: [fmtPct(v)],
+    textposition: "outside", cliponaxis: false, width: 0.4,
+    marker: { color: rgba(CLR[name], 0.85) }, hoverinfo: "skip",
+  }], {
+    margin: { t: 34, r: 14, b: 40, l: 48 },
+    title: { text: `P(return < 0) at ${hYears().toFixed(2)} yr`, font: { size: 13 } },
+    yaxis: { title: "%", range: [0, 100], ticksuffix: "%" },
+    xaxis: { automargin: true }, showlegend: false,
+  }, { displayModeBar: false, responsive: true });
+}
+
+// ---- stats table (between the chart rows) --------------------------
+function renderStats() {
+  const series = activeSeries(), i = state.hIdx;
+  const rows = [
+    ["Mean", s => s.hist.mean[i], true],
+    ["Std. dev.", s => s.hist.std[i], false],
+    ["10th percentile", s => s.hist.p10[i], true],
+    ["90th percentile", s => s.hist.p90[i], true],
+  ];
+  const fmt = (v, signed) => v == null ? "–"
+    : (signed && v > 0 ? "+" : "") + v.toFixed(1) + "%";
+  const head = series.map(n =>
+    `<th style="color:${CLR[n]}">${shortLabel(n)}</th>`).join("");
+  const body = rows.map(([label, get, signed]) =>
+    `<tr><th>${label}</th>` +
+    series.map(n => `<td>${fmt(get(DATA[n]), signed)}</td>`).join("") +
+    `</tr>`).join("");
+  $("statsbar").innerHTML =
+    `<table><thead><tr><th></th>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+// ---- orchestration --------------------------------------------------
+function renderStatic() {
+  const [a, b] = activeSeries();
+  if (isSplit()) {
+    renderFan("fan", a, shortLabel(a) + " — window return");
+    renderFan("pbz", b, shortLabel(b) + " — window return");
+  } else {
+    renderFan("fan", a, "Distribution of the window return");
+    renderPbzCurve("pbz", a);
+  }
+}
+
+function renderDynamic() {
+  const [a, b] = activeSeries();
+  const s0 = DATA[a], i = state.hIdx, yr = hYears();
+  $("hlabel").textContent = yr.toFixed(2) + " years  (" + s0.hist.horizons_days[i] + " days)";
+  renderStats();
+
+  if (isSplit()) {
+    renderDist("hist", a, `${shortLabel(a)} — at ${yr.toFixed(2)} yr`);
+    renderDist("bar", b, `${shortLabel(b)} — at ${yr.toFixed(2)} yr`);
+  } else {
+    const kind = state.mode === "cdf" ? "Cumulative distribution" : "Return distribution";
+    renderDist("hist", a, `${kind} at ${yr.toFixed(2)} yr`);
+    renderPbzBar("bar", a);
+  }
+
   const xAt = s0.horizons_years[dailyIndexForHist(s0, i)];
   Plotly.relayout("fan", { "shapes[0].x0": xAt, "shapes[0].x1": xAt });
   Plotly.relayout("pbz", { "shapes[0].x0": xAt, "shapes[0].x1": xAt });
 
-  const n = s0.hist.n[i], shown = s0.hist.counts[i].reduce((a, b) => a + b, 0);
   $("foot").innerHTML =
-    `Window count at this horizon: ${n.toLocaleString()} overlapping start dates ` +
-    `(${(100 * (1 - shown / n)).toFixed(1)}% of them fall in the clipped &plusmn;1% tails, off the histogram axis). ` +
-    `Data &amp; method: <a href="https://github.com/dominik-sv/investment-return-comparison">github.com/dominik-sv/investment-return-comparison</a>.`;
+    `At this horizon: ${s0.hist.n[i].toLocaleString()} overlapping windows. Histogram x-axis is ` +
+    `fixed across horizons; mass past each edge is shown top-left / top-right. ` +
+    `Bottom &amp; top 10% shaded; the vertical line is the mean. ` +
+    `<a href="https://github.com/dominik-sv/investment-return-comparison">source</a>.`;
 }
 
 function vline() {

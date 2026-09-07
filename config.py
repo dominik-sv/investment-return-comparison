@@ -75,4 +75,7 @@ WEB_METHOD = "common"                     # which sweep to export
 WEB_PCT_LEVELS = [1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99]
 WEB_HIST_BINS = 60
 WEB_HIST_STRIDE_DAYS = 7                  # histogram horizons: every N days
-WEB_HIST_CLIP_PCT = [0.5, 99.5]          # per-horizon histogram range (percentiles)
+# fixed histogram x-range (same for every horizon): the 1st..99th percentile of the
+# distribution at WEB_HIST_RANGE_REF_YEARS. Mass outside is reported per side.
+WEB_HIST_RANGE_PCT = [1, 99]
+WEB_HIST_RANGE_REF_YEARS = 5.0
