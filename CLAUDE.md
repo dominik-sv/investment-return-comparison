@@ -30,6 +30,9 @@ the modelling rationale.
 # export compact JSON for the website (reads .npz, writes docs/data/*.json, ~2.3 MB)
 ~/anaconda3/python.exe export_web.py
 
+# preview the site locally (fetch() needs a server, not file://)
+~/anaconda3/python.exe -m http.server 8123 --directory docs   # -> http://localhost:8123
+
 # execute the driver notebook end to end
 ~/anaconda3/Scripts/jupyter.exe nbconvert --to notebook --execute --inplace run.ipynb --ExecutePreprocessor.timeout=600
 ```
@@ -93,8 +96,10 @@ Flat modules, single source of truth in `config.py`. Pipeline: `get_data` → `d
   `visualize._LABEL` + `visualize._VIZ_OPTS`, a `run.ipynb` viz cell, and
   `export_web.py`'s `_LABEL` / `_UNIT` (+ `_VIEWS` if it belongs in a website view).
 - `export_web.py` is the only bridge to the website: `.npz` -> `docs/data/*.json`.
-  `docs/` is what GitHub Pages serves (Deploy from branch -> main -> /docs); it holds
-  `.nojekyll` + the JSON now, and the frontend (`index.html` + JS) later. The site
-  renders those JSON files and nothing else, so presentation changes are
-  frontend-only; new statistics/series need a re-export.
+  `docs/` is served by GitHub Pages (Deploy from branch -> main -> /docs): `.nojekyll`,
+  the JSON, and `docs/index.html` — a single self-contained page (inline CSS/JS,
+  Plotly from CDN, no build step). It reads only `data/meta.json` + `data/<series>.json`
+  and is unrelated to `visualize.py`, so presentation changes are edits to
+  `index.html` alone; new statistics/series need a re-export (and the series' `_LABEL`/
+  `_UNIT`/`_VIEWS` entries in `export_web.py`).
 - `notes.md` is empty; ignore it.
