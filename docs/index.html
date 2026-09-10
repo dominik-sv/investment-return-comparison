@@ -3,82 +3,211 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Holding-period return distributions</title>
+<title>How long you hold changes everything</title>
+<meta name="description" content="US stocks vs. cash, every start date since 1926, by how long you hold. Interactive holding-period return distributions.">
+<meta property="og:title" content="How long you hold changes everything">
+<meta property="og:description" content="US stocks vs. cash, every start date since 1926 — see how the distribution of returns changes with your holding period.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230969da'/%3E%3Cpath d='M6 24C12 20 15 9 26 7' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3Cpath d='M6 24h20' stroke='white' stroke-width='2' opacity='.5' stroke-linecap='round'/%3E%3C/svg%3E">
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 <style>
   :root {
     --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
-    --accent: #0969da; --card: #f6f8fa;
+    --accent: #0969da; --card: #fbfcfd; --card-border: #e6eaee;
+    --grid: #edf0f2; --chart-fg: #57606a; --zero: #c4cbd2;
+    --c-blue: #0969da; --c-green: #1a7f37;
+    --lo: #cf222e; --hi: #1f7a8c; --mean: #57606a; --marker: #8b949e;
+    --shadow: 0 1px 2px rgba(27,31,36,.05), 0 4px 12px rgba(27,31,36,.05);
   }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --border: #30363d;
+      --accent: #4493f8; --card: #10151c; --card-border: #232a33;
+      --grid: #1b222b; --chart-fg: #8b949e; --zero: #2b333d;
+      --c-blue: #58a6ff; --c-green: #3fb950;
+      --lo: #f85149; --hi: #56d4e0; --mean: #8b949e; --marker: #6e7681;
+      --shadow: 0 0 0 1px rgba(0,0,0,.25), 0 8px 24px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --border: #30363d;
+    --accent: #4493f8; --card: #10151c; --card-border: #232a33;
+    --grid: #1b222b; --chart-fg: #8b949e; --zero: #2b333d;
+    --c-blue: #58a6ff; --c-green: #3fb950;
+    --lo: #f85149; --hi: #56d4e0; --mean: #8b949e; --marker: #6e7681;
+    --shadow: 0 0 0 1px rgba(0,0,0,.25), 0 8px 24px rgba(0,0,0,.4);
+  }
+
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
-    margin: 0; padding: 20px; font: 14px/1.5 -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg);
-    max-width: 1200px; margin-inline: auto;
+    margin: 0; padding: 22px 20px 60px;
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--fg); background: var(--bg); max-width: 1200px; margin-inline: auto;
+    -webkit-font-smoothing: antialiased;
   }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  p.sub { color: var(--muted); margin: 0 0 18px; }
-  .controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-bottom: 16px; }
-  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  h1 { font-size: 22px; margin: 0 0 5px; letter-spacing: -.01em; }
+  p.sub { color: var(--muted); margin: 0 0 16px; max-width: 68ch; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+  .spacer { flex: 1; }
+
+  .seg { position: relative; display: inline-flex; border: 1px solid var(--border);
+    border-radius: 7px; overflow: hidden; background: var(--bg); }
   .seg button {
-    border: 0; background: var(--bg); color: var(--fg); padding: 7px 14px; cursor: pointer;
-    font: inherit; border-right: 1px solid var(--border);
+    position: relative; z-index: 1; border: 0; background: transparent; color: var(--fg);
+    padding: 7px 13px; cursor: pointer; font: inherit; font-size: 13px;
+    border-right: 1px solid var(--border); transition: color .18s;
   }
   .seg button:last-child { border-right: 0; }
-  .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .grid + .grid { margin-top: 14px; }
-  .card { border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 6px; }
-  .plot { width: 100%; height: 340px; }
-  #statsbar { margin: 14px auto; max-width: 720px; }
-  #statsbar table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
-  #statsbar th, #statsbar td { padding: 6px 14px; text-align: right; border-bottom: 1px solid var(--border); }
-  #statsbar thead th { font-weight: 700; }
-  #statsbar tbody th { text-align: left; font-weight: 500; color: var(--muted); }
-  .sliderbox { margin: 18px 2px 4px; }
-  .sliderrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-  .sliderbox label { font-weight: 600; }
-  #modeToggle button { padding: 5px 12px; font-size: 13px; }
-  .sliderbox .val { color: var(--accent); font-variant-numeric: tabular-nums; }
-  input[type=range] { width: 100%; }
-  .foot { color: var(--muted); font-size: 12px; margin-top: 22px; }
-  .foot a { color: var(--accent); }
-  #status { padding: 40px; text-align: center; color: var(--muted); }
+  .seg button[aria-pressed="true"] { color: #fff; }
+  .seg .pill { position: absolute; top: 0; bottom: 0; left: 0; z-index: 0; border-radius: 5px;
+    background: var(--accent); transition: transform .22s cubic-bezier(.4,0,.2,1), width .22s cubic-bezier(.4,0,.2,1); }
   .btn {
-    border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
-    color: var(--fg); padding: 7px 14px; cursor: pointer; font: inherit;
+    border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--fg);
+    padding: 7px 13px; cursor: pointer; font: inherit; font-size: 13px; transition: background .15s;
   }
   .btn:hover { background: var(--card); }
-  #helpBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,.28); z-index: 40; }
-  #help {
-    position: fixed; top: 0; right: 0; height: 100%; width: 380px; max-width: 92vw;
-    background: var(--bg); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0,0,0,.12);
-    z-index: 41; overflow-y: auto; padding: 20px 22px 40px;
+  .btn.icon { padding: 7px 10px; }
+  .btn:active, .seg button:active, .chip:active { transform: scale(.97); }
+  .btn:focus-visible, .seg button:focus-visible, .chip:focus-visible,
+  .dl:focus-visible, #hslider:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .section { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted); margin: 26px 2px 10px; display: flex; align-items: center; gap: 12px; }
+  .section::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  #narrative { font-size: 15.5px; line-height: 1.5; margin: 2px 2px 6px; color: var(--fg); }
+  #narrative b { color: var(--accent); font-weight: 650; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid + .grid { margin-top: 14px; }
+  .card {
+    border: 1px solid var(--card-border); border-radius: 10px; background: var(--card);
+    transition: box-shadow .18s, border-color .18s; display: flex; flex-direction: column;
   }
+  .card:hover { box-shadow: var(--shadow); border-color: var(--border); }
+  .chead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    padding: 10px 12px 3px; }
+  .ct { font-weight: 650; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+  .cdot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+  .cright { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+  .dl { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px;
+    opacity: 0; transition: opacity .15s, color .15s; padding: 0 2px; line-height: 1; }
+  .card:hover .dl { opacity: .65; }
+  .dl:hover { opacity: 1; color: var(--fg); }
+  .plot { width: 100%; height: 296px; }
+  .ckey { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px;
+    padding: 3px 13px 11px; font-size: 10.5px; color: var(--muted); }
+  .ksw { width: 13px; height: 10px; border-radius: 2px; display: inline-block; }
+  .ksw.kline { height: 2px; border-radius: 1px; }
+  .kv { margin-right: 5px; }
+  .klab { margin-right: 3px; opacity: .8; }
+
+  .pbzstat { padding: 22px 20px 20px; display: flex; flex-direction: column; gap: 4px; flex: 1;
+    justify-content: center; }
+  .pbzstat .big { font-size: 54px; font-weight: 700; line-height: 1; letter-spacing: -.025em;
+    font-variant-numeric: tabular-nums; color: var(--lo); }
+  .pbzstat .psub { color: var(--muted); font-size: 13px; }
+  .splitbar { height: 10px; border-radius: 5px; background: var(--grid); overflow: hidden; margin-top: 12px; }
+  .splitbar > span { display: block; height: 100%; background: var(--lo);
+    transition: width .28s cubic-bezier(.4,0,.2,1); }
+  .pbzstat .pscale { display: flex; justify-content: space-between; font-size: 10px;
+    color: var(--muted); margin-top: 3px; }
+
+  #statsbar { margin: 12px 0 2px; }
+  .tilerow { display: grid; grid-template-columns: 96px repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+  .tlabel { align-self: center; font-weight: 650; font-size: 12.5px; }
+  .tile { border: 1px solid var(--card-border); border-radius: 9px; background: var(--card); padding: 9px 11px; }
+  .tv { font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .tk { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+  @media (max-width: 820px) {
+    .grid { grid-template-columns: 1fr; }
+    .tilerow { grid-template-columns: 1fr 1fr; }
+    .tlabel { grid-column: 1 / -1; }
+  }
+
+  .control { margin: 18px 2px 2px; }
+  .controlrow { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    margin-bottom: 12px; flex-wrap: wrap; }
+  .hbig { font-size: 13px; color: var(--muted); }
+  .hbig b { font-size: 21px; color: var(--accent); font-weight: 700; margin-left: 7px;
+    font-variant-numeric: tabular-nums; }
+  #hslider { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 3px;
+    background: var(--grid); accent-color: var(--accent); cursor: pointer; }
+  #hslider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent); border: 3px solid var(--bg); box-shadow: 0 1px 4px rgba(0,0,0,.3);
+    cursor: pointer; margin-top: -6px; transition: transform .12s; }
+  #hslider:active::-webkit-slider-thumb { transform: scale(1.15); }
+  #hslider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--accent);
+    border: 3px solid var(--bg); cursor: pointer; }
+  .ticks { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); margin-top: 5px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 11px; }
+  .chip { border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--fg);
+    padding: 3px 12px; font-size: 12px; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+  .chip:hover { background: var(--card); }
+  .chip[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .foot { color: var(--muted); font-size: 12px; margin-top: 24px; }
+  .foot a { color: var(--accent); }
+
+  #status .sk-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .sk { border-radius: 10px; background: linear-gradient(90deg, var(--card) 25%, var(--grid) 37%, var(--card) 63%);
+    background-size: 400% 100%; animation: sh 1.5s ease infinite; height: 340px; }
+  .sk.thin { height: 70px; }
+  @keyframes sh { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+  #helpBackdrop { position: fixed; inset: 0; background: rgba(0,0,0,.32); z-index: 40;
+    animation: fadeIn .18s ease; }
+  #help {
+    position: fixed; top: 0; right: 0; height: 100%; width: 390px; max-width: 92vw;
+    background: var(--bg); border-left: 1px solid var(--border); box-shadow: -10px 0 30px rgba(0,0,0,.16);
+    z-index: 41; overflow-y: auto; padding: 22px 24px 44px;
+    animation: helpIn .26s cubic-bezier(.4,0,.2,1);
+  }
+  @keyframes fadeIn { from { opacity: 0; } }
+  @keyframes helpIn { from { transform: translateX(26px); opacity: 0; } }
   #help h2 { font-size: 17px; margin: 0 0 12px; }
-  #help h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
+  #help h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
     color: var(--muted); margin: 20px 0 6px; }
-  #help p, #help li { font-size: 13px; line-height: 1.55; }
+  #help p, #help li { font-size: 13px; line-height: 1.58; }
   #help ul { padding-left: 18px; margin: 6px 0; }
+  #help code { background: var(--card); border: 1px solid var(--card-border); border-radius: 4px;
+    padding: 0 4px; font-size: 12px; }
+  #help a { color: var(--accent); }
   #helpClose { position: absolute; top: 14px; right: 16px; border: 0; background: none;
-    font-size: 20px; cursor: pointer; color: var(--muted); line-height: 1; }
+    font-size: 22px; cursor: pointer; color: var(--muted); line-height: 1; }
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; }
-  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+  }
 </style>
 </head>
 <body>
 
-<h1>Holding-period return distributions</h1>
-<p class="sub">US equities vs. cash, every start date 1926&ndash;2025, by how long you hold. Overlapping windows from Ken French (market, 1&#8209;month T&#8209;bill) and BLS CPI.</p>
+<h1>How long you hold changes everything</h1>
+<p class="sub">US stocks vs. cash, <strong>every</strong> start date from July&nbsp;1926 to the end of 2025,
+pooled by how long you hold. Overlapping windows built from Ken&nbsp;French (market, 1&#8209;month T&#8209;bill)
+and BLS CPI.</p>
 
-<div id="status">Loading&hellip;</div>
+<div id="status">
+  <div class="sk-row"><div class="sk"></div><div class="sk"></div></div>
+  <div class="sk thin"></div>
+  <div class="sk-row"><div class="sk"></div><div class="sk"></div></div>
+</div>
 
 <div id="app" hidden>
   <div class="controls">
-    <div class="seg" id="viewToggle" role="group" aria-label="View"></div>
-    <button class="btn" id="zoomBtn">Zoom: detail</button>
+    <span class="seg" id="viewToggle" role="group" aria-label="View"></span>
+    <span class="seg" id="zoomToggle" role="group" aria-label="Zoom">
+      <button data-z="in" aria-pressed="true">Detail</button>
+      <button data-z="out" aria-pressed="false">Full</button>
+    </span>
     <button class="btn" id="helpBtn">How this works</button>
-    <span class="sub" id="viewNote"></span>
+    <span class="spacer"></span>
+    <button class="btn icon" id="themeBtn" title="Theme" aria-label="Toggle theme">&#9681;</button>
   </div>
 
   <div id="helpBackdrop" hidden></div>
@@ -118,13 +247,15 @@
     <h3>The charts</h3>
     <ul>
       <li><strong>Fan</strong> &mdash; the spread of outcomes by holding period. Darker
-      = more likely; the black line is the median (the typical outcome).</li>
+      = more likely; the coloured line is the median (the typical outcome). The key
+      under it names each shade band by its percentile range.</li>
       <li><strong>Distribution (PDF / CDF)</strong> &mdash; every outcome at the selected
       horizon. PDF: how common each result is. CDF: the chance of ending at or below a
-      given value. The worst and best 10% are drawn in <span class="dot" style="background:#cf222e"></span>&nbsp;red.</li>
-      <li><strong>P(return &lt; 0)</strong> &mdash; the chance you ended with less than
-      you put in.</li>
-      <li><strong>Table</strong> &mdash; mean, spread (standard deviation) and the
+      given value. The worst 10% are <span class="dot" style="background:#cf222e"></span>&nbsp;red,
+      the best 10% <span class="dot" style="background:#1f7a8c"></span>&nbsp;teal; the black line is the mean.</li>
+      <li><strong>Chance of a loss</strong> &mdash; the share of windows that ended below
+      where you started.</li>
+      <li><strong>Tiles</strong> &mdash; mean, spread (standard deviation) and the
       10th / 90th percentile at the selected horizon.</li>
     </ul>
 
@@ -132,36 +263,68 @@
     <ul>
       <li><strong>View</strong> &mdash; excess-over-cash, or real market vs. real cash
       side by side.</li>
-      <li><strong>Zoom</strong> &mdash; "detail" trims the axes to the bulk of the data;
-      "full" shows the whole distribution (probability charts are unaffected).</li>
+      <li><strong>Detail / Full</strong> &mdash; "Detail" trims the axes to the bulk of
+      the data; "Full" shows the whole distribution (the loss charts are unaffected).</li>
       <li><strong>PDF / CDF</strong> &mdash; switch the distribution panels between a
       histogram and a cumulative curve.</li>
+      <li>Click anywhere on the fan chart to jump the horizon there.</li>
     </ul>
 
     <p style="margin-top:18px"><a href="https://github.com/dominik-sv/investment-return-comparison">Source &amp; method on GitHub</a></p>
   </aside>
 
+  <p id="narrative"></p>
+
+  <div class="section">Across holding periods</div>
   <div class="grid">
-    <div class="card"><div id="fan" class="plot"></div></div>
-    <div class="card"><div id="pbz" class="plot"></div></div>
+    <div class="card">
+      <div class="chead"><span class="ct" data-for="fan"></span>
+        <span class="cright"><span class="cm" data-for="fan"></span><button class="dl" data-plot="fan" title="Download PNG">&#10515;</button></span></div>
+      <div id="fan" class="plot"></div>
+      <div class="ckey" data-for="fan"></div>
+    </div>
+    <div class="card">
+      <div class="chead"><span class="ct" data-for="pbz"></span>
+        <span class="cright"><span class="cm" data-for="pbz"></span><button class="dl" data-plot="pbz" title="Download PNG">&#10515;</button></span></div>
+      <div id="pbz" class="plot"></div>
+      <div class="ckey" data-for="pbz"></div>
+    </div>
   </div>
 
+  <div class="section">At the selected horizon</div>
   <div id="statsbar"></div>
-
   <div class="grid">
-    <div class="card"><div id="hist" class="plot"></div></div>
-    <div class="card"><div id="bar" class="plot"></div></div>
+    <div class="card">
+      <div class="chead"><span class="ct" data-for="hist"></span>
+        <span class="cright"><span class="cm" data-for="hist"></span><button class="dl" data-plot="hist" title="Download PNG">&#10515;</button></span></div>
+      <div id="hist" class="plot"></div>
+      <div class="ckey" data-for="hist"></div>
+    </div>
+    <div class="card">
+      <div class="chead"><span class="ct" data-for="bar"></span>
+        <span class="cright"><span class="cm" data-for="bar"></span><button class="dl" data-plot="bar" title="Download PNG">&#10515;</button></span></div>
+      <div id="bar" class="plot"></div>
+      <div class="pbzstat" id="pbzStat" hidden>
+        <div class="big" id="pbzBig">–</div>
+        <div class="psub" id="pbzSub"></div>
+        <div class="splitbar"><span id="pbzFill"></span></div>
+        <div class="pscale"><span>0%</span><span>100% of windows</span></div>
+      </div>
+      <div class="ckey" data-for="bar"></div>
+    </div>
   </div>
 
-  <div class="sliderbox">
-    <div class="sliderrow">
-      <label for="hslider">Holding period: <span class="val" id="hlabel"></span></label>
+  <div class="control">
+    <div class="controlrow">
+      <div class="hbig">Holding period <b id="hlabel">–</b></div>
       <span class="seg" id="modeToggle" role="group" aria-label="Distribution view">
         <button data-mode="pdf" aria-pressed="true">PDF</button>
         <button data-mode="cdf" aria-pressed="false">CDF</button>
       </span>
     </div>
-    <input type="range" id="hslider" min="0" max="0" value="0" step="1">
+    <input type="range" id="hslider" min="0" max="0" value="0" step="1" aria-label="Holding period">
+    <div class="ticks" id="ticks"></div>
+    <div class="chips" id="chips"></div>
   </div>
 
   <p class="foot" id="foot"></p>
@@ -170,116 +333,93 @@
 <script>
 "use strict";
 
-const CLR = {
-  excess_wealth: "#0969da",
-  real_market:   "#0969da",
-  real_tbill:    "#1a7f37",
-};
-const EDGE_CLR = "#cf222e";   // bottom-10% / top-10% (red)
-const MEAN_CLR = "#24292f";   // mean line on the distribution panels
-const fmtPct = v => (v == null ? "–" : v.toFixed(1) + "%");
-const shortLabel = name => DATA[name].label.split(" — ")[0];
-const rgba = (hex, a) => {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
-};
-
-const state = { viewKey: null, hIdx: 0, mode: "pdf", zoom: "in" };   // mode: pdf|cdf, zoom: in|out
-let META = null;
-const DATA = {};                 // series name -> payload
+const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif';
+const REDUCE = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const TRANS = REDUCE ? 0 : 260;
 
 const $ = id => document.getElementById(id);
+const css = k => getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+const rgba = (hex, a) => {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+};
+const fmtSigned = v => (v > 0 ? "+" : "") + Math.round(v) + "%";
+const oneIn = p => p <= 0 ? "0" : "1 in " + Math.max(2, Math.round(100 / p));
 
-async function boot() {
-  META = await fetch("data/meta.json").then(r => r.json());
-  const names = Object.keys(META.series_labels);
-  await Promise.all(names.map(async n => { DATA[n] = await fetch(`data/${n}.json`).then(r => r.json()); }));
+const store = {
+  get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+const state = { viewKey: null, hIdx: 0, mode: "pdf", zoom: "in" };
+let META = null;
+const DATA = {};
 
-  // view toggle
-  const tog = $("viewToggle");
-  Object.entries(META.views).forEach(([key, v], i) => {
-    const b = document.createElement("button");
-    b.textContent = v.label;
-    b.setAttribute("aria-pressed", i === 0 ? "true" : "false");
-    b.onclick = () => setView(key);
-    b.dataset.key = key;
-    tog.appendChild(b);
-    if (i === 0) state.viewKey = key;
-  });
-
-  const anySeries = DATA[activeSeries()[0]];
-  const nHist = anySeries.hist.horizons_days.length;
-  const sl = $("hslider");
-  sl.max = nHist - 1;
-  state.hIdx = Math.round(nHist * 0.55);
-  sl.value = state.hIdx;
-  sl.addEventListener("input", () => { state.hIdx = +sl.value; renderDynamic(); });
-
-  document.querySelectorAll("#modeToggle button").forEach(b => {
-    b.onclick = () => {
-      state.mode = b.dataset.mode;
-      document.querySelectorAll("#modeToggle button").forEach(x =>
-        x.setAttribute("aria-pressed", x === b ? "true" : "false"));
-      renderDynamic();
-    };
-  });
-
-  $("zoomBtn").onclick = () => {
-    state.zoom = state.zoom === "in" ? "out" : "in";
-    $("zoomBtn").textContent = state.zoom === "in" ? "Zoom: detail" : "Zoom: full";
-    renderStatic();
-    renderDynamic();
-  };
-
-  const toggleHelp = open => {
-    $("help").hidden = !open;
-    $("helpBackdrop").hidden = !open;
-  };
-  $("helpBtn").onclick = () => toggleHelp(true);
-  $("helpClose").onclick = () => toggleHelp(false);
-  $("helpBackdrop").onclick = () => toggleHelp(false);
-  document.addEventListener("keydown", e => { if (e.key === "Escape") toggleHelp(false); });
-
-  $("status").hidden = true;
-  $("app").hidden = false;
-  setView(state.viewKey);
-}
-
-function setView(key) {
-  state.viewKey = key;
-  document.querySelectorAll("#viewToggle button").forEach(b =>
-    b.setAttribute("aria-pressed", b.dataset.key === key ? "true" : "false"));
-  $("viewNote").textContent = META.views[key].series.map(n => DATA[n].label).join("   vs.   ");
-  renderStatic();
-  renderDynamic();
-}
-
+const seriesColor = name => css(name === "real_tbill" ? "--c-green" : "--c-blue");
+const shortLabel = name => DATA[name].label.split(" — ")[0];
 const activeSeries = () => META.views[state.viewKey].series;
-const isSplit = () => activeSeries().length === 2;   // 2-series view -> market | risk-free columns
-const dailyIndexForHist = (s, hIdx) =>
-  s.horizons_days.indexOf(s.hist.horizons_days[hIdx]);
+const isSplit = () => activeSeries().length === 2;
+const dailyIndexForHist = (s, hIdx) => s.horizons_days.indexOf(s.hist.horizons_days[hIdx]);
 const hYears = () => DATA[activeSeries()[0]].hist.horizons_years[state.hIdx];
+const yrText = yr => yr < 0.96 ? Math.round(yr * 12) + " months"
+  : (Math.round(yr * 10) / 10).toString().replace(/\.0$/, "") + " years";
 
-// ---- fan chart --------------------------------------------------------
-const FAN_LV = [5, 10, 20, 30, 40, 60, 70, 80, 90, 95];   // 9 rings around the median
-const FAN_A = [.09, .13, .18, .25, .34, .25, .18, .13, .09]; // 5 symmetric shade levels
+// ---------- Plotly theming ----------
+function palette() {
+  return {
+    fg: css("--chart-fg"), grid: css("--grid"), zero: css("--zero"), marker: css("--marker"),
+    card: css("--card"), border: css("--border"), lo: css("--lo"), hi: css("--hi"), mean: css("--mean"),
+  };
+}
+function baseLayout() {
+  const p = palette();
+  return {
+    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: { family: FONT, size: 11, color: p.fg },
+    margin: { t: 6, r: 16, b: 38, l: 52 },
+    hoverlabel: { bgcolor: p.card, bordercolor: p.border, font: { family: FONT, size: 12, color: css("--fg") } },
+    showlegend: false, dragmode: false,
+    xaxis: { showgrid: false, zeroline: false, showline: false, ticks: "outside", ticklen: 4,
+             tickcolor: p.grid, tickfont: { size: 10.5 }, automargin: true },
+    yaxis: { gridcolor: p.grid, zeroline: true, zerolinecolor: p.zero, zerolinewidth: 1, showline: false,
+             ticks: "outside", ticklen: 4, tickcolor: p.grid, tickfont: { size: 10.5 }, automargin: true },
+  };
+}
+const CONFIG = { responsive: true, displaylogo: false, displayModeBar: false };
+const markerLine = p => ({ type: "line", xref: "x", yref: "paper", x0: 0, x1: 0, y0: 0, y1: 1,
+  line: { color: (p || palette()).marker, width: 1.5, dash: "dot" } });
 
-function fanTraces(name) {
-  const s = DATA[name], x = s.horizons_years, c = CLR[name];
-  const t = [{ x, y: s.percentiles[FAN_LV[0]], mode: "lines", line: { width: 0 },
-               hoverinfo: "skip", showlegend: false }];
-  for (let k = 1; k < FAN_LV.length; k++) {
-    t.push({ x, y: s.percentiles[FAN_LV[k]], mode: "lines", line: { width: 0 },
-             fill: "tonexty", fillcolor: rgba(c, FAN_A[k - 1]),
-             hoverinfo: "skip", showlegend: false });
-  }
+// ---------- card chrome ----------
+function setHead(slot, title, meta, dot) {
+  document.querySelector(`.ct[data-for="${slot}"]`).innerHTML =
+    (dot ? `<i class="cdot" style="background:${dot}"></i>` : "") + title;
+  document.querySelector(`.cm[data-for="${slot}"]`).textContent = meta || "";
+}
+function setKey(slot, html) { document.querySelector(`.ckey[data-for="${slot}"]`).innerHTML = html || ""; }
+function fanKey(c) {
+  const bands = [["40–60", .34], ["30–70", .25], ["20–80", .18], ["10–90", .13], ["5–95", .09]];
+  return `<span class="klab">middle of the outcomes</span>` +
+    bands.map(([t, a]) => `<span class="ksw" style="background:${rgba(c, a)}"></span><span class="kv">${t}</span>`).join("") +
+    `<span class="ksw kline" style="background:${c}"></span><span class="kv">median</span>`;
+}
+const DIST_KEY =
+  `<span class="ksw" style="background:var(--lo)"></span><span class="kv">worst 10%</span>` +
+  `<span class="ksw" style="background:var(--hi)"></span><span class="kv">best 10%</span>` +
+  `<span class="ksw kline" style="background:var(--mean)"></span><span class="kv">mean</span>` +
+  `<span class="ksw kline" style="background:var(--lo)"></span><span class="kv">10th / 90th pct</span>`;
+
+// ---------- fan ----------
+const FAN_LV = [5, 10, 20, 30, 40, 60, 70, 80, 90, 95];
+const FAN_A = [.09, .13, .18, .25, .34, .25, .18, .13, .09];
+function fanTraces(name, c) {
+  const s = DATA[name], x = s.horizons_years;
+  const t = [{ x, y: s.percentiles[FAN_LV[0]], mode: "lines", line: { width: 0 }, hoverinfo: "skip" }];
+  for (let k = 1; k < FAN_LV.length; k++)
+    t.push({ x, y: s.percentiles[FAN_LV[k]], mode: "lines", line: { width: 0 }, fill: "tonexty",
+             fillcolor: rgba(c, FAN_A[k - 1]), hoverinfo: "skip" });
   t.push({ x, y: s.percentiles[50], mode: "lines", name: shortLabel(name),
-           line: { color: c, width: 1.8 },
-           hovertemplate: "%{x:.1f} yr  median %{y:.1f}<extra></extra>" });
+           line: { color: c, width: 2 }, hovertemplate: "median  %{y:.0f}%<extra></extra>" });
   return t;
 }
-
-// shared y-range for one or more fan panels; "in" = 10th-90th pct, "out" = 1st-99th
 function fanY(names, zoom) {
   const [loK, hiK] = zoom === "out" ? ["1", "99"] : ["10", "90"];
   const lo = Math.min(0, ...names.flatMap(n => DATA[n].percentiles[loK].filter(Number.isFinite)));
@@ -287,99 +427,93 @@ function fanY(names, zoom) {
   const pad = (hi - lo) * 0.06;
   return [lo < 0 ? lo - pad : 0, hi + pad];
 }
-
-// shared x-range for the distribution panels; "in" trims the fixed grid, "out" = full grid
 function histX(edges, zoom) {
   const lo = edges[0], hi = edges[edges.length - 1], w = hi - lo;
   return zoom === "out" ? [lo, hi] : [lo + 0.18 * w, hi - 0.18 * w];
 }
-
-function renderFan(div, name, title, yrange) {
-  const s = DATA[name];
-  Plotly.react(div, fanTraces(name), {
-    margin: { t: 34, r: 14, b: 40, l: 56 },
-    title: { text: title, font: { size: 13 } },
-    xaxis: { title: "Holding period (years)", zeroline: false, dtick: 1 },
-    yaxis: { title: s.unit, zeroline: true, zerolinecolor: "#c8c8c8",
-             range: yrange || fanY([name], state.zoom), autorange: false },
-    showlegend: false, shapes: [vline()],
-  }, { displayModeBar: false, responsive: true });
+function renderFan(slot, name, title, meta, yrange) {
+  const p = palette(), c = seriesColor(name);
+  setHead(slot, title, meta, c);
+  setKey(slot, fanKey(c));
+  const L = baseLayout();
+  L.hovermode = "x unified";
+  L.xaxis = Object.assign(L.xaxis, { title: { text: "holding period (years)", font: { size: 11 } }, dtick: 1,
+    showspikes: true, spikemode: "across", spikethickness: 1, spikedash: "dot", spikecolor: p.marker });
+  L.yaxis = Object.assign(L.yaxis, { range: yrange || fanY([name], state.zoom), autorange: false, ticksuffix: "%" });
+  L.shapes = [markerLine(p)];
+  Plotly.react(slot, fanTraces(name, c), L, CONFIG);
 }
 
-// ---- P(window return < 0) curve ------------------------------------
-function renderPbzCurve(div, name) {
-  const s = DATA[name];
-  Plotly.react(div, [{
-    x: s.horizons_years, y: s.p_below_zero, mode: "lines",
-    line: { color: CLR[name], width: 1.8 },
-    hovertemplate: "%{x:.1f} yr  %{y:.1f}%<extra></extra>",
-  }], {
-    margin: { t: 34, r: 14, b: 40, l: 48 },
-    title: { text: "P(window return < 0)", font: { size: 13 } },
-    xaxis: { title: "Holding period (years)", zeroline: false, dtick: 1 },
-    yaxis: { title: "%", range: [0, 100], ticksuffix: "%" },
-    showlegend: false, shapes: [vline()],
-  }, { displayModeBar: false, responsive: true });
+// ---------- P(loss) curve ----------
+function renderPbzCurve(slot, name) {
+  const p = palette(), c = seriesColor(name);
+  setHead(slot, "Chance of finishing below cash", "share of windows", c);
+  setKey(slot, "");
+  const L = baseLayout();
+  L.hovermode = "x unified";
+  L.xaxis = Object.assign(L.xaxis, { title: { text: "holding period (years)", font: { size: 11 } }, dtick: 1,
+    showspikes: true, spikemode: "across", spikethickness: 1, spikedash: "dot", spikecolor: p.marker });
+  L.yaxis = Object.assign(L.yaxis, { range: [0, 100], autorange: false, ticksuffix: "%" });
+  L.shapes = [markerLine(p)];
+  Plotly.react(slot, [{
+    x: DATA[name].horizons_years, y: DATA[name].p_below_zero, mode: "lines",
+    line: { color: c, width: 2 }, fill: "tozeroy", fillcolor: rgba(c, .08),
+    hovertemplate: "%{y:.0f}% of windows<extra></extra>",
+  }], L, CONFIG);
 }
 
-// ---- distribution panel: PDF (histogram) or CDF (step curve) ----------
-function distDecor(h, i, aboveTop) {   // mean + p10/p90 lines, tail-mass / mean labels
-  const mean = h.mean[i];
-  const pLine = x => ({ type: "line", xref: "x", yref: "paper", x0: x, x1: x, y0: 0, y1: 1,
-                        line: { color: EDGE_CLR, width: 1, dash: "dot" } });
+// ---------- distribution decorations ----------
+function distDecor(h, i, aboveTop) {
+  const p = palette(), mean = h.mean[i];
+  const pl = (x, cc) => ({ type: "line", xref: "x", yref: "paper", x0: x, x1: x, y0: 0, y1: 1,
+    line: { color: cc, width: 1, dash: "dot" } });
   return {
     shapes: [
-      { type: "line", xref: "x", yref: "paper", x0: mean, x1: mean, y0: 0, y1: 1,
-        line: { color: MEAN_CLR, width: 2 } },
-      pLine(h.p10[i]), pLine(h.p90[i]),
+      { type: "line", xref: "x", yref: "paper", x0: mean, x1: mean, y0: 0, y1: 1, line: { color: p.mean, width: 2 } },
+      pl(h.p10[i], p.lo), pl(h.p90[i], p.hi),
     ],
     annotations: [
-      { xref: "paper", yref: "paper", x: 0.01, y: 0.98, xanchor: "left", yanchor: "top",
-        showarrow: false, font: { size: 11, color: "#57606a" },
-        text: "← " + h.below_pct[i].toFixed(1) + "% below" },
-      { xref: "paper", yref: "paper", x: 0.99, y: aboveTop ? 0.98 : 0.04,
-        xanchor: "right", yanchor: aboveTop ? "top" : "bottom",
-        showarrow: false, font: { size: 11, color: "#57606a" },
-        text: h.above_pct[i].toFixed(1) + "% above →" },
-      { x: mean, y: 1, yref: "paper", yanchor: "bottom", showarrow: false,
-        font: { size: 10, color: MEAN_CLR }, text: "mean" },
+      { xref: "paper", yref: "paper", x: 0.015, y: 0.98, xanchor: "left", yanchor: "top", showarrow: false,
+        font: { size: 11, color: p.lo }, text: "◂ " + h.below_pct[i].toFixed(1) + "%" },
+      { xref: "paper", yref: "paper", x: 0.985, y: aboveTop ? 0.98 : 0.05, xanchor: "right",
+        yanchor: aboveTop ? "top" : "bottom", showarrow: false,
+        font: { size: 11, color: p.hi }, text: h.above_pct[i].toFixed(1) + "% ▸" },
     ],
   };
 }
 
-function renderHist(div, name, title, opts = {}) {
-  const s = DATA[name], i = state.hIdx, h = s.hist;
+function renderHist(slot, name, title, meta, opts) {
+  opts = opts || {};
+  const p = palette(), c = seriesColor(name), i = state.hIdx, h = DATA[name].hist;
+  setHead(slot, title, meta, c);
+  setKey(slot, DIST_KEY);
   const e = h.edges, counts = h.counts[i], n = h.n[i];
   const cx = counts.map((_, k) => (e[k] + e[k + 1]) / 2);
   const w = counts.map((_, k) => e[k + 1] - e[k]);
   const p10 = h.p10[i], p90 = h.p90[i];
-  const colors = cx.map(x => (x < p10 || x > p90) ? EDGE_CLR : rgba(CLR[name], 0.55));
+  const colors = cx.map(x => x < p10 ? p.lo : x > p90 ? p.hi : rgba(c, .5));
   const dec = distDecor(h, i, true);
-  const yax = { title: "probability", tickformat: ".1%" };
-  if (opts.yr) { yax.range = opts.yr; yax.autorange = false; } else { yax.rangemode = "tozero"; }
-  Plotly.react(div, [{
-    type: "bar", x: cx, y: counts.map(c => c / n), width: w,
-    marker: { color: colors, line: { width: 0 } },
-    hovertemplate: "%{x:.0f}  %{y:.2%}<extra></extra>",
-  }], {
-    bargap: 0.02, margin: { t: 34, r: 14, b: 40, l: 52 },
-    title: { text: title, font: { size: 13 } },
-    xaxis: { title: s.unit, range: opts.xr || histX(e, state.zoom), autorange: false,
-             zeroline: true, zerolinecolor: "#c8c8c8" },
-    yaxis: yax,
-    shapes: dec.shapes, annotations: dec.annotations, showlegend: false,
-  }, { displayModeBar: false, responsive: true });
+  const L = baseLayout();
+  L.hovermode = "closest"; L.bargap = 0.02;
+  L.xaxis = Object.assign(L.xaxis, { title: { text: "return over the window (%)", font: { size: 11 } },
+    range: opts.xr || histX(e, state.zoom), autorange: false, zeroline: true, zerolinecolor: p.zero });
+  L.yaxis = Object.assign(L.yaxis, { tickformat: ".1%" });
+  if (opts.yr) { L.yaxis.range = opts.yr; L.yaxis.autorange = false; } else { L.yaxis.rangemode = "tozero"; }
+  L.shapes = dec.shapes; L.annotations = dec.annotations;
+  Plotly.react(slot, [{
+    type: "bar", x: cx, y: counts.map(v => v / n), width: w, marker: { color: colors, line: { width: 0 } },
+    hovertemplate: "%{x:.0f}%   %{y:.2%}<extra></extra>",
+  }], L, CONFIG);
 }
 
-function renderCdf(div, name, title, opts = {}) {
-  const s = DATA[name], i = state.hIdx, h = s.hist;
+function renderCdf(slot, name, title, meta, opts) {
+  opts = opts || {};
+  const p = palette(), c = seriesColor(name), i = state.hIdx, h = DATA[name].hist;
+  setHead(slot, title, meta, c);
+  setKey(slot, DIST_KEY);
   const e = h.edges, counts = h.counts[i], n = h.n[i];
-  const xr = opts.xr || histX(e, state.zoom);
-  const lo = xr[0], hi = xr[1];
-  const c10 = Math.max(lo, Math.min(hi, h.p10[i]));
-  const c90 = Math.max(lo, Math.min(hi, h.p90[i]));
-
-  // cumulative probability at each bin edge
+  const xr = opts.xr || histX(e, state.zoom), lo = xr[0], hi = xr[1];
+  const c10 = Math.max(lo, Math.min(hi, h.p10[i])), c90 = Math.max(lo, Math.min(hi, h.p90[i]));
   let cum = h.below_pct[i] / 100;
   const ex = [e[0]], ey = [cum];
   for (let k = 0; k < counts.length; k++) { cum += counts[k] / n; ex.push(e[k + 1]); ey.push(cum); }
@@ -391,99 +525,107 @@ function renderCdf(div, name, title, opts = {}) {
     xs.push(x1); yy.push(yAt(x1));
     return { x: xs, y: yy };
   };
-  const mk = (d, col) => d && {
-    x: d.x, y: d.y, mode: "lines", line: { color: col, width: 2, shape: "hv" },
-    hovertemplate: "%{x:.0f}  %{y:.1%}<extra></extra>", showlegend: false,
-  };
-  const traces = [mk(seg(lo, c10), EDGE_CLR), mk(seg(c10, c90), CLR[name]),
-                  mk(seg(c90, hi), EDGE_CLR)].filter(Boolean);
-
+  const mk = (d, col, fillIt) => d && { x: d.x, y: d.y, mode: "lines",
+    line: { color: col, width: 2, shape: "hv" },
+    fill: fillIt ? "tozeroy" : undefined, fillcolor: fillIt ? rgba(col, .07) : undefined,
+    hovertemplate: "%{x:.0f}%   %{y:.1%}<extra></extra>" };
+  const traces = [mk(seg(lo, c10), p.lo), mk(seg(c10, c90), c, true), mk(seg(c90, hi), p.hi)].filter(Boolean);
   const dec = distDecor(h, i, false);
-  const bands = [[lo, c10], [c90, hi]].map(([x0, x1]) => ({
+  const bands = [[lo, c10, p.lo], [c90, hi, p.hi]].map(([x0, x1, col]) => ({
     type: "rect", xref: "x", yref: "paper", x0, x1, y0: 0, y1: 1, layer: "below",
-    fillcolor: rgba(EDGE_CLR, 0.10), line: { width: 0 },
+    fillcolor: rgba(col, .09), line: { width: 0 },
   }));
-  Plotly.react(div, traces, {
-    margin: { t: 34, r: 14, b: 40, l: 52 },
-    title: { text: title, font: { size: 13 } },
-    xaxis: { title: s.unit, range: xr, autorange: false, zeroline: true, zerolinecolor: "#c8c8c8" },
-    yaxis: { title: "cumulative probability", range: [0, 1], tickformat: ".0%" },
-    shapes: [...bands, ...dec.shapes], annotations: dec.annotations, showlegend: false,
-  }, { displayModeBar: false, responsive: true });
+  const L = baseLayout();
+  L.hovermode = "closest";
+  L.xaxis = Object.assign(L.xaxis, { title: { text: "return over the window (%)", font: { size: 11 } },
+    range: xr, autorange: false, zeroline: true, zerolinecolor: p.zero });
+  L.yaxis = Object.assign(L.yaxis, { range: [0, 1], autorange: false, tickformat: ".0%" });
+  L.shapes = [...bands, ...dec.shapes]; L.annotations = dec.annotations;
+  Plotly.react(slot, traces, L, CONFIG);
 }
 
-const renderDist = (div, name, title, opts) =>
-  (state.mode === "cdf" ? renderCdf : renderHist)(div, name, title, opts);
+const renderDist = (slot, name, title, meta, opts) =>
+  (state.mode === "cdf" ? renderCdf : renderHist)(slot, name, title, meta, opts);
 
-// ---- single-horizon P(<0) bar ------------------------------------
-function renderPbzBar(div, name) {
-  const s = DATA[name], v = s.p_below_zero[dailyIndexForHist(s, state.hIdx)];
-  Plotly.react(div, [{
-    type: "bar", x: ["P(return < 0)"], y: [v], text: [fmtPct(v)],
-    textposition: "outside", cliponaxis: false, width: 0.4,
-    marker: { color: rgba(CLR[name], 0.85) }, hoverinfo: "skip",
-  }], {
-    margin: { t: 34, r: 14, b: 40, l: 48 },
-    title: { text: `P(return < 0) at ${hYears().toFixed(2)} yr`, font: { size: 13 } },
-    yaxis: { title: "%", range: [0, 100], ticksuffix: "%" },
-    xaxis: { automargin: true }, showlegend: false,
-  }, { displayModeBar: false, responsive: true });
-}
-
-// ---- stats table (between the chart rows) — rows = series, cols = stats
+// ---------- stat tiles ----------
 function renderStats() {
   const series = activeSeries(), i = state.hIdx;
   const cols = [
-    ["Mean", s => s.hist.mean[i], true],
-    ["Std. dev.", s => s.hist.std[i], false],
-    ["10th pct", s => s.hist.p10[i], true],
-    ["90th pct", s => s.hist.p90[i], true],
+    ["mean", s => s.hist.mean[i], true, null],
+    ["std dev", s => s.hist.std[i], false, null],
+    ["10th pct", s => s.hist.p10[i], true, "var(--lo)"],
+    ["90th pct", s => s.hist.p90[i], true, "var(--hi)"],
   ];
-  const fmt = (v, signed) => v == null ? "–"
-    : (signed && v > 0 ? "+" : "") + v.toFixed(1) + "%";
-  const head = "<tr><th></th>" + cols.map(([l]) => `<th>${l}</th>`).join("") + "</tr>";
-  const body = series.map(n =>
-    `<tr><th style="color:${CLR[n]}">${shortLabel(n)}</th>` +
-    cols.map(([, get, signed]) => `<td>${fmt(get(DATA[n]), signed)}</td>`).join("") +
-    `</tr>`).join("");
-  $("statsbar").innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+  const fmt = (v, signed) => v == null ? "–" : (signed && v > 0 ? "+" : "") + v.toFixed(1) + "%";
+  $("statsbar").innerHTML = series.map(n =>
+    `<div class="tilerow"><span class="tlabel" style="color:${seriesColor(n)}">${shortLabel(n)}</span>` +
+    cols.map(([k, get, signed, col]) =>
+      `<div class="tile"><div class="tv"${col ? ` style="color:${col}"` : ""}>${fmt(get(DATA[n]), signed)}</div>` +
+      `<div class="tk">${k}</div></div>`).join("") + `</div>`).join("");
 }
 
-// ---- orchestration --------------------------------------------------
+// ---------- narrative ----------
+function setNarrative() {
+  const [a, b] = activeSeries(), i = state.hIdx, s = DATA[a];
+  const t = yrText(s.hist.horizons_years[i]);
+  const m = s.hist.mean[i], pl = s.p_below_zero[dailyIndexForHist(s, i)];
+  let html;
+  if (state.viewKey === "excess") {
+    html = `Over <b>${t}</b>, the market beat cash by <b>${fmtSigned(m)}</b> of your stake on average` +
+      ` &mdash; but <b>${oneIn(pl)}</b> windows still trailed cash.`;
+  } else {
+    const tb = DATA[b], mt = tb.hist.mean[i], plt = tb.p_below_zero[dailyIndexForHist(tb, i)];
+    html = `Over <b>${t}</b>, $1 in the market grew <b>${fmtSigned(m)}</b> in real terms on average` +
+      ` (<b>${oneIn(pl)}</b> windows lost purchasing power). Cash grew <b>${fmtSigned(mt)}</b>,` +
+      ` with <b>${oneIn(plt)}</b> windows behind inflation.`;
+  }
+  $("narrative").innerHTML = html;
+}
+
+// ---------- orchestration ----------
 function renderStatic() {
   const [a, b] = activeSeries();
   if (isSplit()) {
-    const yr = fanY([a, b], state.zoom);         // shared y-axis for the two fans
-    renderFan("fan", a, shortLabel(a) + " — window return", yr);
-    renderFan("pbz", b, shortLabel(b) + " — window return", yr);
+    const yr = fanY([a, b], state.zoom);
+    renderFan("fan", a, `${shortLabel(a)}`, "spread by holding period", yr);
+    renderFan("pbz", b, `${shortLabel(b)}`, "spread by holding period", yr);
   } else {
-    renderFan("fan", a, "Distribution of the window return");
+    renderFan("fan", a, "Spread of outcomes by holding period", DATA[a].unit);
     renderPbzCurve("pbz", a);
   }
 }
 
 function renderDynamic() {
   const [a, b] = activeSeries();
-  const s0 = DATA[a], i = state.hIdx, yr = hYears();
-  $("hlabel").textContent = yr.toFixed(2) + " years  (" + s0.hist.horizons_days[i] + " days)";
+  const s0 = DATA[a], i = state.hIdx, yr = s0.hist.horizons_years[i];
+  const t = yrText(yr);
+  $("hlabel").textContent = t;
+  setNarrative();
   renderStats();
+  syncChips();
 
   if (isSplit()) {
+    $("pbzStat").hidden = true; $("bar").hidden = false;
     const ea = DATA[a].hist.edges, eb = DATA[b].hist.edges;
     const grid = [Math.min(ea[0], eb[0]), Math.max(ea[ea.length - 1], eb[eb.length - 1])];
     const xr = histX(grid, state.zoom);
     let ymax = 0;
-    for (const nm of [a, b]) {
-      const hh = DATA[nm].hist, nn = hh.n[i];
-      ymax = Math.max(ymax, ...hh.counts[i].map(c => c / nn));
-    }
-    const opts = { xr, yr: [0, ymax * 1.12] };   // shared axes for the two dist panels
-    renderDist("hist", a, `${shortLabel(a)} — at ${yr.toFixed(2)} yr`, opts);
-    renderDist("bar", b, `${shortLabel(b)} — at ${yr.toFixed(2)} yr`, opts);
+    for (const nm of [a, b]) { const hh = DATA[nm].hist, nn = hh.n[i]; ymax = Math.max(ymax, ...hh.counts[i].map(v => v / nn)); }
+    const opts = { xr, yr: [0, ymax * 1.12] };
+    renderDist("hist", a, `${shortLabel(a)}`, `outcomes at ${t}`, opts);
+    renderDist("bar", b, `${shortLabel(b)}`, `outcomes at ${t}`, opts);
+    Plotly.Plots.resize($("bar"));
   } else {
-    const kind = state.mode === "cdf" ? "Cumulative distribution" : "Return distribution";
-    renderDist("hist", a, `${kind} at ${yr.toFixed(2)} yr`);
-    renderPbzBar("bar", a);
+    const kind = state.mode === "cdf" ? "Chance of ending at or below a value" : "Every outcome";
+    renderDist("hist", a, kind, `at ${t}`);
+    // bottom-right: big loss stat
+    $("bar").hidden = true; $("pbzStat").hidden = false;
+    const v = s0.p_below_zero[dailyIndexForHist(s0, i)];
+    setHead("bar", "Chance of a loss", `at ${t}`, seriesColor(a));
+    setKey("bar", "");
+    $("pbzBig").textContent = v.toFixed(1) + "%";
+    $("pbzSub").textContent = "of windows ended below where you started";
+    $("pbzFill").style.width = v.toFixed(1) + "%";
   }
 
   const xAt = s0.horizons_years[dailyIndexForHist(s0, i)];
@@ -491,18 +633,134 @@ function renderDynamic() {
   Plotly.relayout("pbz", { "shapes[0].x0": xAt, "shapes[0].x1": xAt });
 
   $("foot").innerHTML =
-    `At this horizon: ${s0.hist.n[i].toLocaleString()} overlapping windows. Histogram x-axis is ` +
-    `fixed across horizons; mass past each edge is shown top-left / top-right. ` +
-    `Bottom &amp; top 10% in red (dotted lines = 10th / 90th percentile); black line = mean. ` +
-    `<a href="https://github.com/dominik-sv/investment-return-comparison">source</a>.`;
+    `${s0.hist.n[i].toLocaleString()} overlapping windows at this horizon. The distribution x-axis is a ` +
+    `fixed grid; "% off-chart" is mass beyond it. Click the fan to set the horizon. ` +
+    `<a href="https://github.com/dominik-sv/investment-return-comparison">source &amp; method</a>.`;
 }
 
-function vline() {
-  return { type: "line", xref: "x", yref: "paper", x0: 0, x1: 0, y0: 0, y1: 1,
-           line: { color: "#8250df", width: 1.5, dash: "dot" } };
+// ---------- controls ----------
+function pillify(seg) {
+  const pill = document.createElement("span"); pill.className = "pill"; seg.prepend(pill);
+  seg._movePill = () => {
+    const on = seg.querySelector('[aria-pressed="true"]'); if (!on) return;
+    pill.style.width = on.offsetWidth + "px";
+    pill.style.transform = `translateX(${on.offsetLeft}px)`;
+  };
+  requestAnimationFrame(seg._movePill);
+  addEventListener("resize", () => seg._movePill());
+}
+function press(seg, btn) {
+  seg.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === btn ? "true" : "false"));
+  seg._movePill && seg._movePill();
 }
 
-boot().catch(e => { $("status").textContent = "Failed to load: " + e.message; });
+function buildChips() {
+  const hy = DATA[activeSeries()[0]].hist.horizons_years;
+  const targets = [0.5, 1, 2, 3, 5, 10];
+  $("chips").innerHTML = targets.map(y => {
+    if (y > hy[hy.length - 1] + 0.5) return "";
+    let bi = 0, bd = 1e9;
+    hy.forEach((v, k) => { const d = Math.abs(v - y); if (d < bd) { bd = d; bi = k; } });
+    const lab = y < 1 ? Math.round(y * 12) + "mo" : y + "y";
+    return `<button class="chip" data-idx="${bi}">${lab}</button>`;
+  }).join("");
+  $("chips").querySelectorAll(".chip").forEach(ch => ch.onclick = () => {
+    state.hIdx = +ch.dataset.idx; $("hslider").value = state.hIdx; renderDynamic();
+  });
+}
+function syncChips() {
+  $("chips").querySelectorAll(".chip").forEach(ch =>
+    ch.setAttribute("aria-current", +ch.dataset.idx === state.hIdx ? "true" : "false"));
+}
+function buildTicks() {
+  const hy = DATA[activeSeries()[0]].hist.horizons_years;
+  const lastY = hy[hy.length - 1];
+  const marks = [hy[0], lastY * 0.25, lastY * 0.5, lastY * 0.75, lastY];
+  $("ticks").innerHTML = marks.map(y =>
+    `<span>${y < 0.1 ? "1 wk" : y < 1 ? Math.round(y * 12) + " mo" : Math.round(y) + " yr"}</span>`).join("");
+}
+
+function applyTheme() {
+  const th = store.get("theme") || "auto";
+  if (th === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", th);
+  $("themeBtn").textContent = th === "dark" ? "☀︎" : th === "light" ? "☾︎" : "◑";
+  $("themeBtn").title = "Theme: " + th;
+}
+
+// ---------- boot ----------
+async function boot() {
+  applyTheme();
+  META = await fetch("data/meta.json").then(r => r.json());
+  const names = Object.keys(META.series_labels);
+  await Promise.all(names.map(async n => { DATA[n] = await fetch(`data/${n}.json`).then(r => r.json()); }));
+
+  const vt = $("viewToggle");
+  Object.entries(META.views).forEach(([key, v], k) => {
+    const b = document.createElement("button");
+    b.textContent = v.label; b.dataset.key = key;
+    b.setAttribute("aria-pressed", k === 0 ? "true" : "false");
+    b.onclick = () => { press(vt, b); setView(key); };
+    vt.appendChild(b);
+    if (k === 0) state.viewKey = key;
+  });
+  pillify(vt); pillify($("modeToggle")); pillify($("zoomToggle"));
+
+  const nHist = DATA[activeSeries()[0]].hist.horizons_days.length;
+  const sl = $("hslider");
+  sl.max = nHist - 1; state.hIdx = Math.round(nHist * 0.55); sl.value = state.hIdx;
+  sl.addEventListener("input", () => { state.hIdx = +sl.value; renderDynamic(); });
+  buildTicks(); buildChips();
+
+  $("modeToggle").querySelectorAll("button").forEach(b => b.onclick = () => {
+    state.mode = b.dataset.mode; press($("modeToggle"), b); renderDynamic();
+  });
+  $("zoomToggle").querySelectorAll("button").forEach(b => b.onclick = () => {
+    state.zoom = b.dataset.z; press($("zoomToggle"), b); renderStatic(); renderDynamic();
+  });
+
+  document.querySelectorAll(".dl").forEach(btn => btn.onclick = () => Plotly.downloadImage($(btn.dataset.plot),
+    { format: "png", scale: 2, width: 920, height: 560, filename: btn.dataset.plot + "-holding-period" }));
+
+  const toggleHelp = open => { $("help").hidden = !open; $("helpBackdrop").hidden = !open; };
+  $("helpBtn").onclick = () => toggleHelp(true);
+  $("helpClose").onclick = () => toggleHelp(false);
+  $("helpBackdrop").onclick = () => toggleHelp(false);
+  document.addEventListener("keydown", e => { if (e.key === "Escape") toggleHelp(false); });
+
+  $("themeBtn").onclick = () => {
+    const cur = store.get("theme") || "auto";
+    const next = { auto: "light", light: "dark", dark: "auto" }[cur];
+    store.set("theme", next); applyTheme();
+    renderStatic(); renderDynamic();
+  };
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if ((store.get("theme") || "auto") === "auto") { renderStatic(); renderDynamic(); }
+  });
+
+  $("status").hidden = true; $("app").hidden = false;
+  setView(state.viewKey);
+
+  ["fan", "pbz"].forEach(id => $(id).on("plotly_click", ev => {
+    const x = ev.points && ev.points[0] && ev.points[0].x; if (x == null) return;
+    const hy = DATA[activeSeries()[0]].hist.horizons_years;
+    let bi = 0, bd = 1e9;
+    hy.forEach((v, k) => { const d = Math.abs(v - x); if (d < bd) { bd = d; bi = k; } });
+    state.hIdx = bi; $("hslider").value = bi; renderDynamic();
+  }));
+}
+
+function setView(key) {
+  state.viewKey = key;
+  $("viewToggle").querySelectorAll("button").forEach(b =>
+    b.setAttribute("aria-pressed", b.dataset.key === key ? "true" : "false"));
+  $("viewToggle")._movePill && $("viewToggle")._movePill();
+  buildChips();
+  renderStatic();
+  renderDynamic();
+}
+
+boot().catch(e => { $("status").innerHTML = "<p style='padding:40px;text-align:center'>Failed to load: " + e.message + "</p>"; });
 </script>
 </body>
 </html>
