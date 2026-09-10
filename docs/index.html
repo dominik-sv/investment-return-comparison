@@ -129,6 +129,7 @@
   }
 
   .control { margin: 18px 2px 2px; }
+  .segrow { display: flex; gap: 8px; flex-wrap: wrap; }
   .controlrow { display: flex; justify-content: space-between; align-items: center; gap: 12px;
     margin-bottom: 12px; flex-wrap: wrap; }
   .hbig { font-size: 13px; color: var(--muted); }
@@ -201,10 +202,6 @@ and BLS CPI.</p>
 <div id="app" hidden>
   <div class="controls">
     <span class="seg" id="viewToggle" role="group" aria-label="View"></span>
-    <span class="seg" id="zoomToggle" role="group" aria-label="Zoom">
-      <button data-z="in" aria-pressed="true">Detail</button>
-      <button data-z="out" aria-pressed="false">Full</button>
-    </span>
     <button class="btn" id="helpBtn">How this works</button>
     <span class="spacer"></span>
     <button class="btn icon" id="themeBtn" title="Theme" aria-label="Toggle theme">&#9681;</button>
@@ -263,8 +260,14 @@ and BLS CPI.</p>
     <ul>
       <li><strong>View</strong> &mdash; excess-over-cash, or real market vs. real cash
       side by side.</li>
-      <li><strong>Detail / Full</strong> &mdash; "Detail" trims the axes to the bulk of
-      the data; "Full" shows the whole distribution (the loss charts are unaffected).</li>
+      <li><strong>Total / Per&nbsp;year</strong> (real view only) &mdash; show each
+      window's return as its total change, or as the equivalent annual rate. Per-year
+      makes the distributions roughly comparable across horizons &mdash; you can watch
+      the spread tighten the longer you hold.</li>
+      <li><strong>Auto&nbsp;fit / Lock</strong> &mdash; the distribution x-axis reframes
+      to fit each horizon as you slide. Hit <em>Lock</em> to freeze the current frame,
+      then scrub the slider to watch the pile move inside it. Anything that falls off
+      the sides is counted in the "◂ %" / "% ▸" labels.</li>
       <li><strong>PDF / CDF</strong> &mdash; switch the distribution panels between a
       histogram and a cumulative curve.</li>
       <li>Click anywhere on the fan chart to jump the horizon there.</li>
@@ -317,10 +320,20 @@ and BLS CPI.</p>
   <div class="control">
     <div class="controlrow">
       <div class="hbig">Holding period <b id="hlabel">–</b></div>
-      <span class="seg" id="modeToggle" role="group" aria-label="Distribution view">
-        <button data-mode="pdf" aria-pressed="true">PDF</button>
-        <button data-mode="cdf" aria-pressed="false">CDF</button>
-      </span>
+      <div class="segrow">
+        <span class="seg" id="unitToggle" role="group" aria-label="Return units" hidden>
+          <button data-u="window" aria-pressed="true">Total</button>
+          <button data-u="annual" aria-pressed="false">Per&nbsp;year</button>
+        </span>
+        <span class="seg" id="xToggle" role="group" aria-label="X-axis range">
+          <button data-x="auto" aria-pressed="true">Auto&nbsp;fit</button>
+          <button data-x="lock" aria-pressed="false">Lock</button>
+        </span>
+        <span class="seg" id="modeToggle" role="group" aria-label="Distribution view">
+          <button data-mode="pdf" aria-pressed="true">PDF</button>
+          <button data-mode="cdf" aria-pressed="false">CDF</button>
+        </span>
+      </div>
     </div>
     <input type="range" id="hslider" min="0" max="0" value="0" step="1" aria-label="Holding period">
     <div class="ticks" id="ticks"></div>
@@ -350,7 +363,8 @@ const store = {
   get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} },
 };
-const state = { viewKey: null, hIdx: 0, mode: "pdf", zoom: "in" };
+const state = { viewKey: null, hIdx: 0, mode: "pdf", xmode: "auto", lockRange: null, annual: false, _lastAutoX: null };
+const ann = (v, days) => v <= -100 ? -101 : ((1 + v / 100) ** (365.25 / days) - 1) * 100;
 let META = null;
 const DATA = {};
 
@@ -360,8 +374,11 @@ const activeSeries = () => META.views[state.viewKey].series;
 const isSplit = () => activeSeries().length === 2;
 const dailyIndexForHist = (s, hIdx) => s.horizons_days.indexOf(s.hist.horizons_days[hIdx]);
 const hYears = () => DATA[activeSeries()[0]].hist.horizons_years[state.hIdx];
-const yrText = yr => yr < 0.96 ? Math.round(yr * 12) + " months"
-  : (Math.round(yr * 10) / 10).toString().replace(/\.0$/, "") + " years";
+const yrText = yr => {
+  if (yr < 0.96) { const m = Math.max(1, Math.round(yr * 12)); return m + (m === 1 ? " month" : " months"); }
+  const y = Math.round(yr * 10) / 10;
+  return (y === 1 ? "1 year" : y.toString().replace(/\.0$/, "") + " years");
+};
 
 // ---------- Plotly theming ----------
 function palette() {
@@ -420,16 +437,36 @@ function fanTraces(name, c) {
            line: { color: c, width: 2 }, hovertemplate: "median  %{y:.0f}%<extra></extra>" });
   return t;
 }
-function fanY(names, zoom) {
-  const [loK, hiK] = zoom === "out" ? ["1", "99"] : ["10", "90"];
-  const lo = Math.min(0, ...names.flatMap(n => DATA[n].percentiles[loK].filter(Number.isFinite)));
-  const hi = Math.max(...names.flatMap(n => DATA[n].percentiles[hiK].filter(Number.isFinite)));
+function fanY(names) {
+  const lo = Math.min(0, ...names.flatMap(n => DATA[n].percentiles["5"].filter(Number.isFinite)));
+  const hi = Math.max(...names.flatMap(n => DATA[n].percentiles["95"].filter(Number.isFinite)));
   const pad = (hi - lo) * 0.06;
   return [lo < 0 ? lo - pad : 0, hi + pad];
 }
-function histX(edges, zoom) {
-  const lo = edges[0], hi = edges[edges.length - 1], w = hi - lo;
-  return zoom === "out" ? [lo, hi] : [lo + 0.18 * w, hi - 0.18 * w];
+// adaptive x-range for the distribution panels: 1st..99th pct of the CURRENT horizon
+// (annualised-aware), clamped to the binned grid so nothing is asked for that we can't draw
+function autoX(names, i) {
+  const A = state.annual;
+  let lo = Infinity, hi = -Infinity, glo = Infinity, ghi = -Infinity;
+  for (const n of names) {
+    const h = DATA[n].hist, days = h.horizons_days[i];
+    const ed = A ? h.edges.map(x => ann(x, days)) : h.edges;
+    glo = Math.min(glo, ed[0]); ghi = Math.max(ghi, ed[ed.length - 1]);
+    lo = Math.min(lo, A ? h.a_p1[i] : h.p1[i]);
+    hi = Math.max(hi, A ? h.a_p99[i] : h.p99[i]);
+  }
+  lo = Math.min(lo, 0);
+  const pad = Math.max(1, (hi - lo) * 0.05);
+  return [Math.max(glo, lo - pad), Math.min(ghi, hi + pad)];
+}
+function tailMass(h, i, e, xlo, xhi) {
+  const counts = h.counts[i], n = h.n[i];
+  let below = 0, above = 0;
+  for (let k = 0; k < counts.length; k++) {
+    const cxk = (e[k] + e[k + 1]) / 2;
+    if (cxk < xlo) below += counts[k]; else if (cxk > xhi) above += counts[k];
+  }
+  return [100 * below / n + (h.below_pct[i] || 0), 100 * above / n + (h.above_pct[i] || 0)];
 }
 function renderFan(slot, name, title, meta, yrange) {
   const p = palette(), c = seriesColor(name);
@@ -439,7 +476,7 @@ function renderFan(slot, name, title, meta, yrange) {
   L.hovermode = "x unified";
   L.xaxis = Object.assign(L.xaxis, { title: { text: "holding period (years)", font: { size: 11 } }, dtick: 1,
     showspikes: true, spikemode: "across", spikethickness: 1, spikedash: "dot", spikecolor: p.marker });
-  L.yaxis = Object.assign(L.yaxis, { range: yrange || fanY([name], state.zoom), autorange: false, ticksuffix: "%" });
+  L.yaxis = Object.assign(L.yaxis, { range: yrange || fanY([name]), autorange: false, ticksuffix: "%" });
   L.shapes = [markerLine(p)];
   Plotly.react(slot, fanTraces(name, c), L, CONFIG);
 }
@@ -463,21 +500,21 @@ function renderPbzCurve(slot, name) {
 }
 
 // ---------- distribution decorations ----------
-function distDecor(h, i, aboveTop) {
-  const p = palette(), mean = h.mean[i];
+function distDecor(mean, p10, p90, belowPct, abovePct, aboveTop) {
+  const p = palette();
   const pl = (x, cc) => ({ type: "line", xref: "x", yref: "paper", x0: x, x1: x, y0: 0, y1: 1,
     line: { color: cc, width: 1, dash: "dot" } });
   return {
     shapes: [
       { type: "line", xref: "x", yref: "paper", x0: mean, x1: mean, y0: 0, y1: 1, line: { color: p.mean, width: 2 } },
-      pl(h.p10[i], p.lo), pl(h.p90[i], p.hi),
+      pl(p10, p.lo), pl(p90, p.hi),
     ],
     annotations: [
       { xref: "paper", yref: "paper", x: 0.015, y: 0.98, xanchor: "left", yanchor: "top", showarrow: false,
-        font: { size: 11, color: p.lo }, text: "◂ " + h.below_pct[i].toFixed(1) + "%" },
+        font: { size: 11, color: p.lo }, text: "◂ " + belowPct.toFixed(1) + "%" },
       { xref: "paper", yref: "paper", x: 0.985, y: aboveTop ? 0.98 : 0.05, xanchor: "right",
         yanchor: aboveTop ? "top" : "bottom", showarrow: false,
-        font: { size: 11, color: p.hi }, text: h.above_pct[i].toFixed(1) + "% ▸" },
+        font: { size: 11, color: p.hi }, text: abovePct.toFixed(1) + "% ▸" },
     ],
   };
 }
@@ -485,35 +522,42 @@ function distDecor(h, i, aboveTop) {
 function renderHist(slot, name, title, meta, opts) {
   opts = opts || {};
   const p = palette(), c = seriesColor(name), i = state.hIdx, h = DATA[name].hist;
+  const A = state.annual, days = h.horizons_days[i];
   setHead(slot, title, meta, c);
   setKey(slot, DIST_KEY);
-  const e = h.edges, counts = h.counts[i], n = h.n[i];
+  const e = A ? h.edges.map(x => ann(x, days)) : h.edges;
+  const counts = h.counts[i], n = h.n[i];
   const cx = counts.map((_, k) => (e[k] + e[k + 1]) / 2);
   const w = counts.map((_, k) => e[k + 1] - e[k]);
-  const p10 = h.p10[i], p90 = h.p90[i];
+  const p10 = A ? h.a_p10[i] : h.p10[i], p90 = A ? h.a_p90[i] : h.p90[i], mean = A ? h.a_mean[i] : h.mean[i];
   const colors = cx.map(x => x < p10 ? p.lo : x > p90 ? p.hi : rgba(c, .5));
-  const dec = distDecor(h, i, true);
+  const xr = opts.xr, tm = tailMass(h, i, e, xr[0], xr[1]);
+  const dec = distDecor(mean, p10, p90, tm[0], tm[1], true);
   const L = baseLayout();
   L.hovermode = "closest"; L.bargap = 0.02;
-  L.xaxis = Object.assign(L.xaxis, { title: { text: "return over the window (%)", font: { size: 11 } },
-    range: opts.xr || histX(e, state.zoom), autorange: false, zeroline: true, zerolinecolor: p.zero });
+  L.xaxis = Object.assign(L.xaxis, {
+    title: { text: A ? "annualised return (% per year)" : "return over the window (%)", font: { size: 11 } },
+    range: xr, autorange: false, zeroline: true, zerolinecolor: p.zero });
   L.yaxis = Object.assign(L.yaxis, { tickformat: ".1%" });
   if (opts.yr) { L.yaxis.range = opts.yr; L.yaxis.autorange = false; } else { L.yaxis.rangemode = "tozero"; }
   L.shapes = dec.shapes; L.annotations = dec.annotations;
   Plotly.react(slot, [{
     type: "bar", x: cx, y: counts.map(v => v / n), width: w, marker: { color: colors, line: { width: 0 } },
-    hovertemplate: "%{x:.0f}%   %{y:.2%}<extra></extra>",
+    hovertemplate: (A ? "%{x:.1f}%/yr" : "%{x:.0f}%") + "   %{y:.2%}<extra></extra>",
   }], L, CONFIG);
 }
 
 function renderCdf(slot, name, title, meta, opts) {
   opts = opts || {};
   const p = palette(), c = seriesColor(name), i = state.hIdx, h = DATA[name].hist;
+  const A = state.annual, days = h.horizons_days[i];
   setHead(slot, title, meta, c);
   setKey(slot, DIST_KEY);
-  const e = h.edges, counts = h.counts[i], n = h.n[i];
-  const xr = opts.xr || histX(e, state.zoom), lo = xr[0], hi = xr[1];
-  const c10 = Math.max(lo, Math.min(hi, h.p10[i])), c90 = Math.max(lo, Math.min(hi, h.p90[i]));
+  const e = A ? h.edges.map(x => ann(x, days)) : h.edges;
+  const counts = h.counts[i], n = h.n[i];
+  const xr = opts.xr, lo = xr[0], hi = xr[1];
+  const p10 = A ? h.a_p10[i] : h.p10[i], p90 = A ? h.a_p90[i] : h.p90[i], mean = A ? h.a_mean[i] : h.mean[i];
+  const c10 = Math.max(lo, Math.min(hi, p10)), c90 = Math.max(lo, Math.min(hi, p90));
   let cum = h.below_pct[i] / 100;
   const ex = [e[0]], ey = [cum];
   for (let k = 0; k < counts.length; k++) { cum += counts[k] / n; ex.push(e[k + 1]); ey.push(cum); }
@@ -528,16 +572,18 @@ function renderCdf(slot, name, title, meta, opts) {
   const mk = (d, col, fillIt) => d && { x: d.x, y: d.y, mode: "lines",
     line: { color: col, width: 2, shape: "hv" },
     fill: fillIt ? "tozeroy" : undefined, fillcolor: fillIt ? rgba(col, .07) : undefined,
-    hovertemplate: "%{x:.0f}%   %{y:.1%}<extra></extra>" };
+    hovertemplate: (A ? "%{x:.1f}%/yr" : "%{x:.0f}%") + "   %{y:.1%}<extra></extra>" };
   const traces = [mk(seg(lo, c10), p.lo), mk(seg(c10, c90), c, true), mk(seg(c90, hi), p.hi)].filter(Boolean);
-  const dec = distDecor(h, i, false);
+  const tm = tailMass(h, i, e, lo, hi);
+  const dec = distDecor(mean, p10, p90, tm[0], tm[1], false);
   const bands = [[lo, c10, p.lo], [c90, hi, p.hi]].map(([x0, x1, col]) => ({
     type: "rect", xref: "x", yref: "paper", x0, x1, y0: 0, y1: 1, layer: "below",
     fillcolor: rgba(col, .09), line: { width: 0 },
   }));
   const L = baseLayout();
   L.hovermode = "closest";
-  L.xaxis = Object.assign(L.xaxis, { title: { text: "return over the window (%)", font: { size: 11 } },
+  L.xaxis = Object.assign(L.xaxis, {
+    title: { text: A ? "annualised return (% per year)" : "return over the window (%)", font: { size: 11 } },
     range: xr, autorange: false, zeroline: true, zerolinecolor: p.zero });
   L.yaxis = Object.assign(L.yaxis, { range: [0, 1], autorange: false, tickformat: ".0%" });
   L.shapes = [...bands, ...dec.shapes]; L.annotations = dec.annotations;
@@ -549,19 +595,20 @@ const renderDist = (slot, name, title, meta, opts) =>
 
 // ---------- stat tiles ----------
 function renderStats() {
-  const series = activeSeries(), i = state.hIdx;
+  const series = activeSeries(), i = state.hIdx, A = state.annual, sfx = A ? " /yr" : "";
+  const g = (s, w, aw) => (A ? s.hist[aw] : s.hist[w])[i];
   const cols = [
-    ["mean", s => s.hist.mean[i], true, null],
-    ["std dev", s => s.hist.std[i], false, null],
-    ["10th pct", s => s.hist.p10[i], true, "var(--lo)"],
-    ["90th pct", s => s.hist.p90[i], true, "var(--hi)"],
+    ["mean", s => g(s, "mean", "a_mean"), true, null],
+    ["std dev", s => g(s, "std", "a_std"), false, null],
+    ["10th pct", s => g(s, "p10", "a_p10"), true, "var(--lo)"],
+    ["90th pct", s => g(s, "p90", "a_p90"), true, "var(--hi)"],
   ];
   const fmt = (v, signed) => v == null ? "–" : (signed && v > 0 ? "+" : "") + v.toFixed(1) + "%";
   $("statsbar").innerHTML = series.map(n =>
     `<div class="tilerow"><span class="tlabel" style="color:${seriesColor(n)}">${shortLabel(n)}</span>` +
     cols.map(([k, get, signed, col]) =>
       `<div class="tile"><div class="tv"${col ? ` style="color:${col}"` : ""}>${fmt(get(DATA[n]), signed)}</div>` +
-      `<div class="tk">${k}</div></div>`).join("") + `</div>`).join("");
+      `<div class="tk">${k}${sfx}</div></div>`).join("") + `</div>`).join("");
 }
 
 // ---------- narrative ----------
@@ -574,10 +621,16 @@ function setNarrative() {
     html = `Over <b>${t}</b>, the market beat cash by <b>${fmtSigned(m)}</b> of your stake on average` +
       ` &mdash; but <b>${oneIn(pl)}</b> windows still trailed cash.`;
   } else {
-    const tb = DATA[b], mt = tb.hist.mean[i], plt = tb.p_below_zero[dailyIndexForHist(tb, i)];
-    html = `Over <b>${t}</b>, $1 in the market grew <b>${fmtSigned(m)}</b> in real terms on average` +
-      ` (<b>${oneIn(pl)}</b> windows lost purchasing power). Cash grew <b>${fmtSigned(mt)}</b>,` +
-      ` with <b>${oneIn(plt)}</b> windows behind inflation.`;
+    const A = state.annual, tb = DATA[b];
+    const mm = A ? s.hist.a_mean[i] : m, mt = A ? tb.hist.a_mean[i] : tb.hist.mean[i];
+    const plt = tb.p_below_zero[dailyIndexForHist(tb, i)];
+    const g = v => (v > 0 ? "+" : "") + v.toFixed(A ? 1 : 0) + "%";
+    html = A
+      ? `Held <b>${t}</b>, real returns ran <b>${g(mm)}</b> a year for the market vs <b>${g(mt)}</b> for cash on average` +
+        ` &mdash; and <b>${oneIn(pl)}</b> market windows, <b>${oneIn(plt)}</b> cash windows, still lost to inflation.`
+      : `Over <b>${t}</b>, $1 in the market grew <b>${g(mm)}</b> in real terms on average` +
+        ` (<b>${oneIn(pl)}</b> windows lost purchasing power). Cash grew <b>${g(mt)}</b>,` +
+        ` with <b>${oneIn(plt)}</b> windows behind inflation.`;
   }
   $("narrative").innerHTML = html;
 }
@@ -586,7 +639,7 @@ function setNarrative() {
 function renderStatic() {
   const [a, b] = activeSeries();
   if (isSplit()) {
-    const yr = fanY([a, b], state.zoom);
+    const yr = fanY([a, b]);
     renderFan("fan", a, `${shortLabel(a)}`, "spread by holding period", yr);
     renderFan("pbz", b, `${shortLabel(b)}`, "spread by holding period", yr);
   } else {
@@ -604,11 +657,13 @@ function renderDynamic() {
   renderStats();
   syncChips();
 
+  // one x-range for the distribution row: auto-fit the current horizon, or a frozen frame
+  const auto = autoX(activeSeries(), i);
+  state._lastAutoX = auto;
+  const xr = state.xmode === "lock" && state.lockRange ? state.lockRange : auto;
+
   if (isSplit()) {
     $("pbzStat").hidden = true; $("bar").hidden = false;
-    const ea = DATA[a].hist.edges, eb = DATA[b].hist.edges;
-    const grid = [Math.min(ea[0], eb[0]), Math.max(ea[ea.length - 1], eb[eb.length - 1])];
-    const xr = histX(grid, state.zoom);
     let ymax = 0;
     for (const nm of [a, b]) { const hh = DATA[nm].hist, nn = hh.n[i]; ymax = Math.max(ymax, ...hh.counts[i].map(v => v / nn)); }
     const opts = { xr, yr: [0, ymax * 1.12] };
@@ -617,7 +672,7 @@ function renderDynamic() {
     Plotly.Plots.resize($("bar"));
   } else {
     const kind = state.mode === "cdf" ? "Chance of ending at or below a value" : "Every outcome";
-    renderDist("hist", a, kind, `at ${t}`);
+    renderDist("hist", a, kind, `at ${t}`, { xr });
     // bottom-right: big loss stat
     $("bar").hidden = true; $("pbzStat").hidden = false;
     const v = s0.p_below_zero[dailyIndexForHist(s0, i)];
@@ -633,8 +688,9 @@ function renderDynamic() {
   Plotly.relayout("pbz", { "shapes[0].x0": xAt, "shapes[0].x1": xAt });
 
   $("foot").innerHTML =
-    `${s0.hist.n[i].toLocaleString()} overlapping windows at this horizon. The distribution x-axis is a ` +
-    `fixed grid; "% off-chart" is mass beyond it. Click the fan to set the horizon. ` +
+    `${s0.hist.n[i].toLocaleString()} overlapping windows at this horizon. ` +
+    `The distribution x-axis auto-fits each horizon &mdash; hit <b>Lock</b> to freeze the frame and scrub. ` +
+    `"◂ %" / "% ▸" is mass off the sides. Click the fan to set the horizon. ` +
     `<a href="https://github.com/dominik-sv/investment-return-comparison">source &amp; method</a>.`;
 }
 
@@ -704,7 +760,7 @@ async function boot() {
     vt.appendChild(b);
     if (k === 0) state.viewKey = key;
   });
-  pillify(vt); pillify($("modeToggle")); pillify($("zoomToggle"));
+  pillify(vt); pillify($("modeToggle")); pillify($("xToggle")); pillify($("unitToggle"));
 
   const nHist = DATA[activeSeries()[0]].hist.horizons_days.length;
   const sl = $("hslider");
@@ -715,8 +771,17 @@ async function boot() {
   $("modeToggle").querySelectorAll("button").forEach(b => b.onclick = () => {
     state.mode = b.dataset.mode; press($("modeToggle"), b); renderDynamic();
   });
-  $("zoomToggle").querySelectorAll("button").forEach(b => b.onclick = () => {
-    state.zoom = b.dataset.z; press($("zoomToggle"), b); renderStatic(); renderDynamic();
+  $("xToggle").querySelectorAll("button").forEach(b => b.onclick = () => {
+    if (b.dataset.x === "lock") { state.xmode = "lock"; state.lockRange = state._lastAutoX ? state._lastAutoX.slice() : null; }
+    else { state.xmode = "auto"; state.lockRange = null; }
+    press($("xToggle"), b); renderDynamic();
+  });
+  $("unitToggle").querySelectorAll("button").forEach(b => b.onclick = () => {
+    state.annual = b.dataset.u === "annual";
+    state.xmode = "auto"; state.lockRange = null;                 // units changed -> release the lock
+    press($("xToggle"), $("xToggle").querySelector('[data-x="auto"]'));
+    press($("unitToggle"), b);
+    renderDynamic();
   });
 
   document.querySelectorAll(".dl").forEach(btn => btn.onclick = () => Plotly.downloadImage($(btn.dataset.plot),
@@ -755,6 +820,15 @@ function setView(key) {
   $("viewToggle").querySelectorAll("button").forEach(b =>
     b.setAttribute("aria-pressed", b.dataset.key === key ? "true" : "false"));
   $("viewToggle")._movePill && $("viewToggle")._movePill();
+  // "Per year" (annualised) only makes sense in the real-return view; a locked
+  // x-range would be in the wrong series' units, so drop it on any view change
+  const canAnnual = isSplit();
+  $("unitToggle").hidden = !canAnnual;
+  if (!canAnnual) state.annual = false;
+  state.xmode = "auto"; state.lockRange = null;
+  press($("xToggle"), $("xToggle").querySelector('[data-x="auto"]'));
+  press($("unitToggle"), $("unitToggle").querySelector(state.annual ? '[data-u="annual"]' : '[data-u="window"]'));
+  if (canAnnual) requestAnimationFrame(() => $("unitToggle")._movePill && $("unitToggle")._movePill());
   buildChips();
   renderStatic();
   renderDynamic();

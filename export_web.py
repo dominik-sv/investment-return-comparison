@@ -69,20 +69,32 @@ def _series_payload(name: str, method: str) -> dict:
     lo, hi = (float(x) for x in np.percentile(dist[ref_h], config.WEB_HIST_RANGE_PCT))
     edges = np.linspace(lo, hi, config.WEB_HIST_BINS + 1)
 
+    def annualise(r, days):
+        base = np.clip(1.0 + np.asarray(r) / 100.0, 1e-9, None)
+        return (base ** (365.25 / days) - 1.0) * 100.0
+
     counts, below, above, hmean, hstd, hmed, hp10, hp90, hn = ([] for _ in range(9))
+    hp1, hp99 = [], []
+    ha_mean, ha_std, ha_p10, ha_p90, ha_p1, ha_p99 = ([] for _ in range(6))
     for h in hh:
         r = dist[int(h)]
         c, _ = np.histogram(r, bins=edges)
         counts.append([int(x) for x in c])
         below.append(100.0 * float(np.mean(r < lo)))
         above.append(100.0 * float(np.mean(r > hi)))
-        p10, p90 = np.percentile(r, [10, 90])
+        p1, p10, p90, p99 = np.percentile(r, [1, 10, 90, 99])
         hmean.append(float(r.mean()))
         hstd.append(float(r.std(ddof=1)))
         hmed.append(float(np.median(r)))
-        hp10.append(float(p10))
-        hp90.append(float(p90))
+        hp1.append(float(p1)); hp10.append(float(p10))
+        hp90.append(float(p90)); hp99.append(float(p99))
         hn.append(int(r.size))
+
+        a = annualise(r, int(h))                 # annualised-return distribution
+        a1, a10, a90, a99 = np.percentile(a, [1, 10, 90, 99])
+        ha_mean.append(float(a.mean())); ha_std.append(float(a.std(ddof=1)))
+        ha_p1.append(float(a1)); ha_p10.append(float(a10))
+        ha_p90.append(float(a90)); ha_p99.append(float(a99))
 
     return {
         "name": name,
@@ -106,8 +118,16 @@ def _series_payload(name: str, method: str) -> dict:
             "mean": _r(hmean, 3),
             "std": _r(hstd, 3),
             "median": _r(hmed, 3),
+            "p1": _r(hp1, 3),
             "p10": _r(hp10, 3),
             "p90": _r(hp90, 3),
+            "p99": _r(hp99, 3),
+            "a_mean": _r(ha_mean, 3),
+            "a_std": _r(ha_std, 3),
+            "a_p1": _r(ha_p1, 3),
+            "a_p10": _r(ha_p10, 3),
+            "a_p90": _r(ha_p90, 3),
+            "a_p99": _r(ha_p99, 3),
         },
     }
 
