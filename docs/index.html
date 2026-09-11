@@ -47,7 +47,7 @@
     color: var(--fg); background: var(--bg); max-width: 1200px; margin-inline: auto;
     -webkit-font-smoothing: antialiased;
   }
-  h1 { font-size: 22px; margin: 0 0 5px; letter-spacing: -.01em; }
+  h1 { font-size: 22px; margin: 0 0 18px; letter-spacing: -.01em; }
   p.sub { color: var(--muted); margin: 0 0 16px; max-width: 68ch; }
 
   .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
@@ -77,6 +77,9 @@
   .section { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
     color: var(--muted); margin: 26px 2px 10px; display: flex; align-items: center; gap: 12px; }
   .section::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+  .hz { color: var(--accent); text-transform: none; letter-spacing: normal; }
+  .connector { display: flex; justify-content: center; margin: 2px 0 -16px; color: var(--accent);
+    font-size: 15px; line-height: 1; opacity: .55; pointer-events: none; }
 
   #narrative { font-size: 15.5px; line-height: 1.5; margin: 2px 2px 6px; color: var(--fg); }
   #narrative b { color: var(--accent); font-weight: 650; }
@@ -189,9 +192,6 @@
 <body>
 
 <h1>How long you hold changes everything</h1>
-<p class="sub">US stocks vs. cash, <strong>every</strong> start date from July&nbsp;1926 to the end of 2025,
-pooled by how long you hold. Overlapping windows built from Ken&nbsp;French (market, 1&#8209;month T&#8209;bill)
-and BLS CPI.</p>
 
 <div id="status">
   <div class="sk-row"><div class="sk"></div><div class="sk"></div></div>
@@ -294,7 +294,8 @@ and BLS CPI.</p>
     </div>
   </div>
 
-  <div class="section">At the selected horizon</div>
+  <div class="connector" aria-hidden="true">⌄</div>
+  <div class="section">At the selected horizon <span id="hzTag" class="hz"></span></div>
   <div id="statsbar"></div>
   <div class="grid">
     <div class="card">
@@ -383,7 +384,7 @@ const yrText = yr => {
 // ---------- Plotly theming ----------
 function palette() {
   return {
-    fg: css("--chart-fg"), grid: css("--grid"), zero: css("--zero"), marker: css("--marker"),
+    fg: css("--chart-fg"), grid: css("--grid"), zero: css("--zero"), marker: css("--accent"),
     card: css("--card"), border: css("--border"), lo: css("--lo"), hi: css("--hi"), mean: css("--mean"),
   };
 }
@@ -427,14 +428,17 @@ const DIST_KEY =
 // ---------- fan ----------
 const FAN_LV = [5, 10, 20, 30, 40, 60, 70, 80, 90, 95];
 const FAN_A = [.09, .13, .18, .25, .34, .25, .18, .13, .09];
+const pctLabel = lvl => `${lvl}th percentile`;
 function fanTraces(name, c) {
   const s = DATA[name], x = s.horizons_years;
-  const t = [{ x, y: s.percentiles[FAN_LV[0]], mode: "lines", line: { width: 0 }, hoverinfo: "skip" }];
+  const hv = lvl => `${pctLabel(lvl)}<br>%{y:.0f}%<extra></extra>`;
+  const t = [{ x, y: s.percentiles[FAN_LV[0]], mode: "lines", line: { width: 0 },
+               hovertemplate: hv(FAN_LV[0]) }];
   for (let k = 1; k < FAN_LV.length; k++)
     t.push({ x, y: s.percentiles[FAN_LV[k]], mode: "lines", line: { width: 0 }, fill: "tonexty",
-             fillcolor: rgba(c, FAN_A[k - 1]), hoverinfo: "skip" });
+             fillcolor: rgba(c, FAN_A[k - 1]), hovertemplate: hv(FAN_LV[k]) });
   t.push({ x, y: s.percentiles[50], mode: "lines", name: shortLabel(name),
-           line: { color: c, width: 2 }, hovertemplate: "median  %{y:.0f}%<extra></extra>" });
+           line: { color: c, width: 2 }, hovertemplate: "median · 50th percentile<br>%{y:.0f}%<extra></extra>" });
   return t;
 }
 function fanY(names) {
@@ -473,7 +477,7 @@ function renderFan(slot, name, title, meta, yrange) {
   setHead(slot, title, meta, c);
   setKey(slot, fanKey(c));
   const L = baseLayout();
-  L.hovermode = "x unified";
+  L.hovermode = "closest";   // pick the nearest percentile curve, so hover names which band you're on
   L.xaxis = Object.assign(L.xaxis, { title: { text: "holding period (years)", font: { size: 11 } }, dtick: 1,
     showspikes: true, spikemode: "across", spikethickness: 1, spikedash: "dot", spikecolor: p.marker });
   L.yaxis = Object.assign(L.yaxis, { range: yrange || fanY([name]), autorange: false, ticksuffix: "%" });
@@ -570,7 +574,7 @@ function renderCdf(slot, name, title, meta, opts) {
     return { x: xs, y: yy };
   };
   const mk = (d, col, fillIt) => d && { x: d.x, y: d.y, mode: "lines",
-    line: { color: col, width: 2, shape: "hv" },
+    line: { color: col, width: 2, shape: "linear" },   // linear, not "hv": smooths the bin-edge jumps
     fill: fillIt ? "tozeroy" : undefined, fillcolor: fillIt ? rgba(col, .07) : undefined,
     hovertemplate: (A ? "%{x:.1f}%/yr" : "%{x:.0f}%") + "   %{y:.1%}<extra></extra>" };
   const traces = [mk(seg(lo, c10), p.lo), mk(seg(c10, c90), c, true), mk(seg(c90, hi), p.hi)].filter(Boolean);
@@ -653,6 +657,7 @@ function renderDynamic() {
   const s0 = DATA[a], i = state.hIdx, yr = s0.hist.horizons_years[i];
   const t = yrText(yr);
   $("hlabel").textContent = t;
+  $("hzTag").textContent = "— " + t;
   setNarrative();
   renderStats();
   syncChips();
